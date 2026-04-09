@@ -1,8 +1,9 @@
 [build]
-builder = "dockerfile"
+builder = "nixpacks"
 
 [deploy]
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+startCommand = "HOSTNAME=0.0.0.0 bun run start"

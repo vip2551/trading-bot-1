@@ -1,8 +1,4 @@
-# Nixpacks configuration for Railway
-# Force Node.js 22 for Next.js 16
-
 [phases.setup]
-nixPkgs = ["nodejs_22", "bun", "openssl"]
 
 [phases.install]
 cmd = "bun install"
@@ -11,7 +7,4 @@ cmd = "bun install"
 cmd = "bunx prisma generate && bun run build"
 
 [start]
-cmd = "bun run start"
-
-[variables]
-NODE_ENV = "production"
+cmd = "HOSTNAME=0.0.0.0 bunx prisma db push --skip-generate; HOSTNAME=0.0.0.0 bun run start"
