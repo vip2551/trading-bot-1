@@ -1,0 +1,845 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/cli/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Subscription Plans (Dynamic - Admin can modify)
+model Plan {
+  id                  String   @id @default(cuid())
+  
+  // Plan Details
+  name                String   @unique    // TRIAL, BASIC, PRO, ENTERPRISE
+  displayName         String             // "Free Trial", "Basic", etc.
+  displayNameEn       String?            // English display name
+  description         String?
+  
+  // Pricing
+  priceMonthly        Float    @default(0)
+  priceYearly         Float    @default(0)
+  currency            String   @default("USD")
+  
+  // Original Prices (for showing discounts)
+  originalPriceMonthly Float?
+  originalPriceYearly  Float?
+  
+  // Discount Settings
+  discountPercent     Float?              // نسبة الخصم (10, 20, 30...)
+  discountEnabled     Boolean  @default(false)
+  discountExpiresAt   DateTime?           // انتهاء صلاحية الخصم
+  discountLabel       String?             // "خصم 20%", "عرض خاص"
+  
+  // Limits
+  maxTradesPerDay     Int      @default(5)      // -1 = unlimited
+  maxActiveTrades     Int      @default(2)      // -1 = unlimited
+  trialDays           Int      @default(0)      // 0 = no trial
+  
+  // Features (stored as JSON)
+  features            String?  // JSON array of feature names
+  featuresAr          String?  // Arabic features
+  
+  // Feature Toggles
+  hasAIAnalysis       Boolean  @default(false)
+  hasWhaleTracker     Boolean  @default(false)
+  hasAdvancedCharts   Boolean  @default(false)
+  hasPaperTrading     Boolean  @default(false)
+  hasBacktesting      Boolean  @default(false)
+  hasTelegramNotif    Boolean  @default(true)
+  hasPrioritySupport  Boolean  @default(false)
+  hasAPIAccess        Boolean  @default(false)
+  
+  // Display
+  isPopular           Boolean  @default(false)
+  isActive            Boolean  @default(true)
+  sortOrder           Int      @default(0)
+  badgeText           String?              // "الأكثر شعبية", "الأفضل قيمة"
+  badgeColor          String?              // "green", "blue", "purple"
+  
+  // Stripe
+  stripePriceIdMonthly   String?
+  stripePriceIdYearly    String?
+  
+  // Relations
+  subscriptions       Subscription[]
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// Promo Codes
+model PromoCode {
+  id                  String   @id @default(cuid())
+  
+  code                String   @unique   // SAVE20, NEWYEAR2024
+  description         String?
+  
+  // Discount
+  discountType        String   // PERCENT, FIXED
+  discountValue       Float    // 20 for 20%, or 50 for $50
+  
+  // Limits
+  maxUses             Int?               // null = unlimited
+  currentUses         Int      @default(0)
+  maxUsesPerUser      Int      @default(1)
+  
+  // Validity
+  validFrom           DateTime?
+  validUntil          DateTime?
+  isActive            Boolean  @default(true)
+  
+  // Restrictions
+  minPurchaseAmount   Float?
+  applicablePlans     String?  // JSON array of plan IDs, null = all
+  forNewUsersOnly     Boolean  @default(false)
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// User
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String?
+  image         String?
+  isAdmin       Boolean   @default(false)
+  
+  // Email Verification
+  emailVerified       Boolean     @default(false)
+  emailVerifiedAt     DateTime?
+  verificationToken   String?
+  verificationExpires DateTime?
+  
+  // Password Reset
+  resetToken          String?
+  resetExpires        DateTime?
+  
+  // 2FA
+  twoFactorEnabled    Boolean     @default(false)
+  twoFactorSecret     String?
+  
+  // Subscription
+  subscription  Subscription?
+  payments      Payment[]
+  
+  // Bot Settings
+  botSettings   BotSettings?
+  trades        Trade[]              @relation("UserTrades")
+  signals       TradingViewSignal[]  @relation("UserSignals")
+  
+  // Backtesting
+  backtests     Backtest[]           @relation("UserBacktests")
+  
+  // Notification Settings
+  notificationSettings NotificationSettings?
+  
+  // Price Alerts
+  priceAlerts         PriceAlert[]
+  notifSettingsExt    NotificationSettingsExtended?
+  
+  // Paper Trading
+  paperTradingAccount PaperTradingAccount?
+  
+  // Audit Logs
+  auditLogs     AuditLog[]           @relation("UserAuditLogs")
+
+  // Watchlist
+  watchlist     WatchlistItem[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+// Subscription
+model Subscription {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Plan (reference to dynamic Plan)
+  planId          String?
+  plan            Plan?     @relation(fields: [planId], references: [id])
+  
+  // Legacy plan name for backward compatibility
+  planName        String    @default("TRIAL")
+  
+  // Status
+  status          String    @default("ACTIVE") // ACTIVE, CANCELLED, EXPIRED, PAST_DUE
+  
+  // Trial
+  isTrial         Boolean   @default(false)
+  trialEndsAt     DateTime?
+  
+  // Billing
+  currentPeriodStart  DateTime?
+  currentPeriodEnd    DateTime?
+  cancelAtPeriodEnd   Boolean   @default(false)
+  
+  // Stripe
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  
+  // Limits (copied from plan at subscription time)
+  maxTradesPerDay     Int       @default(5)
+  maxActiveTrades     Int       @default(2)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// Payments
+model Payment {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Payment Details
+  amount          Float
+  currency        String    @default("USD")
+  status          String    @default("PENDING") // PENDING, COMPLETED, FAILED, REFUNDED
+  
+  // Stripe
+  stripePaymentIntentId  String?
+  stripeInvoiceId        String?
+  
+  // Plan purchased
+  planName        String
+  billingPeriod   String    // MONTHLY, YEARLY
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// Notification Settings
+model NotificationSettings {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Telegram
+  telegramEnabled     Boolean  @default(false)
+  telegramBotToken    String?
+  telegramChatId      String?
+
+  // Discord
+  discordEnabled      Boolean  @default(false)
+  discordWebhookUrl   String?
+
+  // Email
+  emailEnabled        Boolean  @default(false)
+  emailOnTradeOpen    Boolean  @default(true)
+  emailOnTradeClose   Boolean  @default(true)
+  emailOnDailyReport  Boolean  @default(false)
+
+  // Push Notifications
+  pushEnabled         Boolean  @default(false)
+  pushOnTradeOpen     Boolean  @default(true)
+  pushOnTradeClose    Boolean  @default(true)
+  pushOnPriceAlert    Boolean  @default(false)
+
+  // Notification Preferences
+  notifyOnNewSignal   Boolean  @default(true)
+  notifyOnError       Boolean  @default(true)
+  quietHoursEnabled   Boolean  @default(false)
+  quietHoursStart     String?  // "22:00"
+  quietHoursEnd       String?  // "08:00"
+
+  // Notification Language
+  notificationLanguage String  @default("en") // "en" or "ar"
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// Bot Settings
+model BotSettings {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  isRunning           Boolean  @default(false)
+  
+  // Interactive Brokers Settings
+  accountType         String   @default("PAPER") // PAPER, LIVE, SIMULATION
+  ibHost              String   @default("127.0.0.1")
+  ibPort              Int      @default(7497)
+  ibClientId          Int      @default(1)
+  ibConnected         Boolean  @default(false)
+  
+  // Trading Settings
+  defaultQuantity     Int      @default(1)
+  maxRiskPerTrade     Float    @default(100.0)
+  defaultExpiry       String   @default("0DTE") // 0DTE, WEEKLY
+  
+  // Position Sizing
+  positionSizeMode    String   @default("FIXED") // FIXED, PERCENTAGE, RISK_BASED
+  positionSizePercent Float    @default(5.0)    // نسبة من المحفظة (5% مثلاً)
+  positionSizeAmount  Float    @default(500.0)  // مبلغ ثابت بالدولار
+  
+  // SPX Options Settings
+  spxStrikeOffset     Int      @default(5)
+  spxDeltaTarget      Float    @default(0.3)
+  strikeSelectionMode String   @default("CONTRACT_PRICE") // OFFSET, DELTA, MANUAL, CONTRACT_PRICE
+  
+  // Contract Price Range (للبحث عن استرايك بسعر عقد معين)
+  contractPriceMin    Float    @default(300.0)
+  contractPriceMax    Float    @default(400.0)
+  
+  // Spread & Liquidity Settings (إعدادات السبريد والسيولة)
+  maxSpreadPercent    Float    @default(5.0)     // أقصى سبريد مسموح (%)
+  minLiquidity        Int      @default(100)     // أقل سيولة مطلوبة (عدد العقود)
+  checkLiquidity      Boolean  @default(true)    // التحقق من السيولة
+  checkSpread         Boolean  @default(true)    // التحقق من السبريد
+  maxSlippagePercent  Float    @default(1.0)     // أقصى انزلاق سعري مسموح (%)
+  
+  // Execution Settings (إعدادات التنفيذ)
+  orderType           String   @default("LIMIT") // MARKET, LIMIT, STOP
+  limitOrderOffset    Float    @default(0.5)     // فارق سعر الليميت عن البيد
+  timeoutSeconds      Int      @default(30)      // مهلة تنفيذ الأمر
+  retryAttempts       Int      @default(3)       // عدد محاولات إعادة التنفيذ
+  
+  // Multiple Trades Control (التحكم في الصفقات المتعددة)
+  allowMultipleTrades Boolean  @default(false)    // السماح بصفقات متعددة
+  maxOpenPositions    Int      @default(1)        // أقصى عدد من المراكز المفتوحة
+
+  // Smart Trading Mode (وضع التداول الذكي)
+  smartModeEnabled       Boolean  @default(false)   // تفعيل الوضع الذكي
+  maxDailyLoss           Float    @default(500.0)   // أقصى خسارة يومية
+  avoidLowLiquidityHours Boolean  @default(true)    // تجنب ساعات السيولة المنخفضة
+  avoidNewsEvents        Boolean  @default(false)   // تجنب أحداث الأخبار
+
+  // Risk Management Defaults
+  defaultStopLoss     Float?
+  defaultTakeProfit   Float?
+  trailingStopDefault Float?
+  
+  // Account Info
+  accountBalance      Float?
+  availableFunds      Float?
+  buyingPower         Float?
+  
+  // Telegram Settings
+  telegramBotToken    String?
+  telegramChatId      String?
+  telegramEnabled     Boolean  @default(false)
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// Paper Trading Account
+model PaperTradingAccount {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Account Info
+  balance             Float    @default(100000)
+  availableFunds      Float    @default(100000)
+  initialBalance      Float    @default(100000)
+  dailyPnL            Float    @default(0)
+  totalTrades         Int      @default(0)
+  winningTrades       Int      @default(0)
+  losingTrades        Int      @default(0)
+  
+  // Settings
+  leverage            Float    @default(1)
+  commission          Float    @default(0.65)
+  slippage            Float    @default(0.1)
+  maxPositionSize     Float    @default(10)
+  maxDailyLoss        Float    @default(5)
+  riskPerTrade        Float    @default(2)
+  
+  // Timestamps
+  lastResetAt         DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  // Relations
+  trades              PaperTrade[]
+}
+
+// Paper Trading Trades
+model PaperTrade {
+  id                  String   @id @default(cuid())
+  accountId           String
+  account             PaperTradingAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  // Trade Info
+  symbol              String
+  direction           String   // CALL, PUT, BUY, SELL
+  quantity            Int
+  entryPrice          Float
+  exitPrice           Float?
+  currentPrice        Float    @default(0)
+  
+  // Risk Management
+  stopLoss            Float?
+  takeProfit          Float?
+  trailingStopPercent Float?
+  trailingStopPrice   Float?
+  highestPrice        Float    @default(0)
+  lowestPrice         Float    @default(0)
+  
+  // Results
+  pnl                 Float    @default(0)
+  pnlPercent          Float    @default(0)
+  
+  // Status
+  status              String   @default("OPEN") // OPEN, CLOSED
+  closeReason         String?
+  
+  // Timestamps
+  openedAt            DateTime @default(now())
+  closedAt            DateTime?
+  expiresAt           DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// Trades
+model Trade {
+  id                  String   @id @default(cuid())
+  userId              String?
+  user                User?    @relation("UserTrades", fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Trade Info
+  symbol              String
+  instrumentType      String   // STOCK, OPTION, FUTURE, FOREX
+  direction           String   // CALL, PUT, BUY, SELL
+  quantity            Int
+  filledQuantity      Int      @default(0)
+  entryPrice          Float
+  exitPrice           Float?
+  
+  // Options Specific
+  strike              Float?
+  expiry              String?
+  optionType          String?  // CALL, PUT
+  
+  // Greeks (for options)
+  delta               Float?
+  gamma               Float?
+  theta               Float?
+  vega                Float?
+  impliedVolatility   Float?
+  
+  // Status
+  status              String   @default("PENDING")
+  ibOrderId           Int?
+  
+  // P&L
+  pnl                 Float?
+  pnlPercent          Float?
+  maxDrawdown         Float?    // Max adverse excursion
+  maxProfit           Float?    // Max favorable excursion
+  
+  // Risk Management
+  stopLoss            Float?
+  takeProfit          Float?
+  
+  // Trailing Stop
+  trailingStopEnabled    Boolean  @default(false)
+  trailingStopAmount     Float?
+  trailingStopPercent    Float?
+  trailingStopPrice      Float?
+  trailingStopActivated  Boolean  @default(false)
+  
+  // Bracket Orders
+  isBracketOrder      Boolean  @default(false)
+  bracketStopOrderId  Int?
+  bracketProfitOrderId Int?
+  
+  // Time-based Exit
+  maxHoldingMinutes   Int?
+  autoCloseAt         DateTime?
+  
+  // Signal Info
+  signalSource        String?
+  signalStrategy      String?
+  signalTime          DateTime?
+  
+  // Spread & Liquidity at execution
+  bidPrice            Float?   // سعر الشراء وقت التنفيذ
+  askPrice            Float?   // سعر البيع وقت التنفيذ
+  spreadPercent       Float?   // السبريد (%)
+  volumeAtExecution   Int?     // السيولة المتاحة
+  slippage            Float?   // الانزلاق السعري
+  
+  // Tags for analytics
+  tags                String?  // JSON array
+  
+  // Timestamps
+  openedAt            DateTime?
+  closedAt            DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  // Relations
+  notifications       TradeNotification[]
+  logs                TradeLog[]
+}
+
+// Trade Notifications
+model TradeNotification {
+  id              String   @id @default(cuid())
+  tradeId         String
+  trade           Trade    @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  
+  type            String   // TELEGRAM, DISCORD, EMAIL, PUSH
+  message         String
+  status          String   @default("SENT") // SENT, FAILED
+  sentAt          DateTime @default(now())
+  createdAt       DateTime @default(now())
+}
+
+// Trade Logs
+model TradeLog {
+  id              String   @id @default(cuid())
+  tradeId         String
+  trade           Trade    @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  
+  action          String
+  details         String?
+  price           Float?
+  timestamp       DateTime @default(now())
+}
+
+// TradingView Signals
+model TradingViewSignal {
+  id              String   @id @default(cuid())
+  userId          String?
+  user            User?    @relation("UserSignals", fields: [userId], references: [id], onDelete: Cascade)
+  
+  symbol          String
+  action          String
+  strategy        String?
+  price           Float?
+  strike          Float?
+  expiry          String?
+  quantity        Int?
+  stopLoss        Float?
+  takeProfit      Float?
+  
+  processed       Boolean  @default(false)
+  processedAt     DateTime?
+  tradeId         String?
+  
+  rawPayload      String?
+  
+  createdAt       DateTime @default(now())
+}
+
+// Backtest
+model Backtest {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation("UserBacktests", fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Strategy Info
+  name            String
+  description     String?
+  symbol          String
+  timeframe       String   // 1m, 5m, 15m, 1h, 4h, 1d
+  
+  // Date Range
+  startDate       DateTime
+  endDate         DateTime
+  
+  // Parameters
+  parameters      String?  // JSON
+  
+  // Results
+  totalTrades     Int      @default(0)
+  winCount        Int      @default(0)
+  lossCount       Int      @default(0)
+  winRate         Float    @default(0)
+  totalPnL        Float    @default(0)
+  maxDrawdown     Float    @default(0)
+  sharpeRatio     Float?
+  profitFactor    Float?
+  averageWin      Float?
+  averageLoss     Float?
+  largestWin      Float?
+  largestLoss     Float?
+  
+  // Status
+  status          String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
+  progress        Int      @default(0)  // 0-100
+  
+  // Results Data
+  trades          String?  // JSON array of simulated trades
+  equityCurve     String?  // JSON array of equity over time
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// System Audit Log
+model AuditLog {
+  id              String   @id @default(cuid())
+  userId          String?
+  user            User?    @relation("UserAuditLogs", fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Action Info
+  action          String   // LOGIN, LOGOUT, TRADE_OPEN, TRADE_CLOSE, SETTINGS_CHANGE, etc.
+  entity          String?  // User, Trade, Settings, etc.
+  entityId        String?
+  
+  // Details
+  details         String?  // JSON
+  ipAddress       String?
+  userAgent       String?
+  
+  // Status
+  status          String   @default("SUCCESS") // SUCCESS, FAILED
+  errorMessage    String?
+  
+  createdAt       DateTime @default(now())
+}
+
+// System Settings (Admin)
+model SystemSettings {
+  id              String   @id @default(cuid())
+  
+  // Maintenance
+  maintenanceMode Boolean  @default(false)
+  maintenanceMessage String?
+  
+  // Registration
+  registrationEnabled Boolean @default(true)
+  allowedDomains      String? // Comma-separated email domains
+  
+  // Rate Limiting
+  apiRateLimit    Int      @default(100) // requests per minute
+  webhookRateLimit Int     @default(50)
+  
+  // Backup
+  backupEnabled   Boolean  @default(false)
+  backupInterval  Int      @default(24) // hours
+  lastBackupAt    DateTime?
+  
+  // System
+  systemEmail     String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Daily Statistics (for charts)
+model DailyStats {
+  id              String   @id @default(cuid())
+  date            DateTime @unique
+  
+  // Trading Stats
+  totalTrades     Int      @default(0)
+  winningTrades   Int      @default(0)
+  losingTrades    Int      @default(0)
+  totalPnL        Float    @default(0)
+  totalVolume     Float    @default(0)
+  
+  // User Stats
+  activeUsers     Int      @default(0)
+  newUsers        Int      @default(0)
+  newSubscriptions Int     @default(0)
+  
+  // System Stats
+  signalsReceived Int      @default(0)
+  errors          Int      @default(0)
+  
+  createdAt       DateTime @default(now())
+}
+
+// Price Alerts
+model PriceAlert {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Alert Details
+  symbol          String   // SPX, VIX, etc.
+  targetType      String   @default("PRICE") // PRICE, DELTA, VOLUME, SPREAD
+  targetValue     Float    // Target price or value
+  condition       String   // ABOVE, BELOW, CROSSES
+  
+  // Status
+  active          Boolean  @default(true)
+  triggered       Boolean  @default(false)
+  triggeredAt     DateTime?
+  triggerPrice    Float?
+  
+  // Notification
+  notifyVia       String   @default("[]") // JSON array: ["TELEGRAM", "EMAIL"]
+  customMessage   String?
+  repeatable      Boolean  @default(false)
+  
+  // Metadata
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Notification Settings Extended
+model NotificationSettingsExtended {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Telegram
+  telegramBotToken    String?
+  telegramChatId      String?
+  telegramEnabled     Boolean @default(false)
+
+  // Alert Settings
+  preCloseMinutes     Int     @default(5)    // Alert before trade close
+  stopLossAlertPct    Float   @default(50)   // Alert at X% from SL
+  takeProfitAlertPct  Float   @default(80)   // Alert at X% from TP
+  pnlAlertThreshold   Float   @default(100)  // Alert on P&L change > $X
+
+  // Daily Report
+  dailyReportEnabled  Boolean @default(false)
+  dailyReportTime     String  @default("17:00") // Time to send daily report
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// Watchlist - قائمة المراقبة للأسهم والعقود
+model WatchlistItem {
+  id              String   @id @default(cuid())
+  userId          String?
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Symbol Info
+  symbol          String                     // AAPL, TSLA, SPX, ES
+  name            String?                    // Apple Inc., Tesla Inc.
+  type            String   @default("STOCK") // STOCK, OPTION, FUTURE, FOREX, CRYPTO, INDEX
+
+  // Option Specific (for options tracking)
+  strike          Float?
+  expiry          String?                    // 2024-12-20
+  optionType      String?                    // CALL, PUT
+
+  // Exchange & Currency
+  exchange        String?                    // NASDAQ, NYSE, CBOE
+  currency        String   @default("USD")
+
+  // Settings
+  enabled         Boolean  @default(true)    // فعال/غير فعال
+  autoTrade       Boolean  @default(false)   // تداول تلقائي لهذا الرمز
+  quantity        Int      @default(1)       // الكمية الافتراضية
+
+  // Strategy Settings
+  strategy        String   @default("MIXED") // RSI, MACD, MIXED, CUSTOM
+  stopLossPercent Float?                     // نسبة وقف الخسارة
+  takeProfitPercent Float?                   // نسبة جني الأرباح
+
+  // Price Tracking
+  lastPrice       Float?
+  priceChange     Float?
+  priceChangePercent Float?
+  lastUpdated     DateTime?
+
+  // Notes
+  notes           String?
+
+  // Display
+  sortOrder       Int      @default(0)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Signal Log - سجل الإشارات من TradingView
+model SignalLog {
+  id              String   @id @default(cuid())
+
+  // Source
+  source          String   @default("TRADINGVIEW") // TRADINGVIEW, MANUAL, AUTO
+  webhookId       String?  // معرف فريد للإشارة
+
+  // Signal Info
+  symbol          String
+  action          String   // BUY, SELL, CLOSE, EXIT
+  direction       String?  // CALL, PUT, LONG, SHORT
+
+  // Price Info
+  price           Float?
+  entryPrice      Float?
+  currentPrice    Float?
+
+  // Option Specific
+  strike          Float?
+  expiry          String?
+  optionType      String?
+
+  // Quantity & Size
+  quantity        Int?
+  positionSize    Float?
+
+  // Risk Management
+  stopLoss        Float?
+  takeProfit      Float?
+  trailingStop    Float?
+
+  // Strategy Info
+  strategy        String?
+  strategyName    String?
+  timeframe       String?
+  confidence      Float?   // 0-100
+
+  // Processing Status
+  status          String   @default("RECEIVED") // RECEIVED, VALIDATED, EXECUTED, FAILED, IGNORED
+  executed        Boolean  @default(false)
+  executedAt      DateTime?
+  tradeId         String?
+
+  // Error Info
+  errorMessage    String?
+  errorCode       String?
+
+  // Response
+  responseStatus  Int?     // HTTP status
+  responseMessage String?
+
+  // Raw Data
+  rawPayload      String?  // JSON payload كامل
+  headers         String?  // Headers from webhook
+
+  // User Agent & IP
+  sourceIp        String?
+  userAgent       String?
+
+  createdAt       DateTime @default(now())
+}
+
+// Webhook Secret - مفاتيح الأمان للـ Webhooks
+model WebhookSecret {
+  id              String   @id @default(cuid())
+  userId          String?
+
+  // Secret
+  secret          String   @unique
+  name            String?  // "Main Webhook", "Backup Webhook"
+
+  // Permissions
+  permissions     String   @default("[]") // JSON array: ["TRADE", "SIGNAL", "STATUS"]
+
+  // Status
+  active          Boolean  @default(true)
+  lastUsedAt      DateTime?
+  useCount        Int      @default(0)
+
+  // Security
+  ipWhitelist     String?  // JSON array of allowed IPs
+  rateLimit       Int      @default(60) // requests per minute
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
