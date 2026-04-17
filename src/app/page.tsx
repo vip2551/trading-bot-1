@@ -3060,10 +3060,78 @@ export default function Dashboard() {
                     <Input value={ibClientId} onChange={(e) => setIbClientId(e.target.value)} />
                   </div>
                 </div>
-                <Button onClick={() => saveSettings({ ibHost, ibPort: parseInt(ibPort) || 7497, ibClientId: parseInt(ibClientId) || 1 })} disabled={saving}>
-                  {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-                  {t.saveSettings}
-                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={() => saveSettings({ ibHost, ibPort: parseInt(ibPort) || 7497, ibClientId: parseInt(ibClientId) || 1 })} disabled={saving}>
+                    {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                    {t.saveSettings}
+                  </Button>
+                  
+                  {/* Connect/Disconnect Button */}
+                  {!ibStatus?.connected ? (
+                    <Button 
+                      onClick={async () => {
+                        setSaving(true);
+                        try {
+                          const res = await fetch("/api/ib", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              action: "connect",
+                              userId: "demo",
+                              host: ibHost,
+                              port: parseInt(ibPort) || 7497,
+                              clientId: parseInt(ibClientId) || 1,
+                              accountType: ibPort === "7497" ? "paper" : "live"
+                            })
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            toast.success(lang === "ar" ? "تم الاتصال بنجاح!" : "Connected successfully!");
+                            fetchData();
+                          } else {
+                            toast.error(data.error || data.message || (lang === "ar" ? "فشل الاتصال" : "Connection failed"));
+                          }
+                        } catch (e) {
+                          toast.error(lang === "ar" ? "فشل الاتصال" : "Connection failed");
+                        } finally {
+                          setSaving(false);
+                        }
+                      }} 
+                      disabled={saving}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      <Wifi className="h-4 w-4 mr-2" />
+                      {lang === "ar" ? "اتصال الآن" : "Connect Now"}
+                    </Button>
+                  ) : (
+                    <Button 
+                      variant="destructive"
+                      onClick={async () => {
+                        setSaving(true);
+                        try {
+                          const res = await fetch("/api/ib/disconnect", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ userId: "demo" })
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            toast.success(lang === "ar" ? "تم قطع الاتصال" : "Disconnected");
+                            fetchData();
+                          }
+                        } catch (e) {
+                          toast.error(lang === "ar" ? "فشل قطع الاتصال" : "Disconnect failed");
+                        } finally {
+                          setSaving(false);
+                        }
+                      }} 
+                      disabled={saving}
+                    >
+                      <XCircle className="h-4 w-4 mr-2" />
+                      {lang === "ar" ? "قطع الاتصال" : "Disconnect"}
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
 
