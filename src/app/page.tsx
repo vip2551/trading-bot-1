@@ -3060,15 +3060,42 @@ export default function Dashboard() {
                     <Input value={ibClientId} onChange={(e) => setIbClientId(e.target.value)} />
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Button onClick={() => saveSettings({ ibHost, ibPort: parseInt(ibPort) || 7497, ibClientId: parseInt(ibClientId) || 1 })} disabled={saving}>
                     {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
                     {t.saveSettings}
                   </Button>
-                  
-                  {/* Connect/Disconnect Button */}
-                  {!ibStatus?.connected ? (
-                    <Button 
+
+                  {/* Connect/Disconnect Button - ALWAYS VISIBLE */}
+                  {ibStatus?.connected ? (
+                    <Button
+                      variant="destructive"
+                      onClick={async () => {
+                        setSaving(true);
+                        try {
+                          const res = await fetch("/api/ib/disconnect", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ userId: "demo" })
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            toast.success(lang === "ar" ? "تم قطع الاتصال" : "Disconnected");
+                            fetchData();
+                          }
+                        } catch (e) {
+                          toast.error(lang === "ar" ? "فشل قطع الاتصال" : "Disconnect failed");
+                        } finally {
+                          setSaving(false);
+                        }
+                      }}
+                      disabled={saving}
+                    >
+                      <XCircle className="h-4 w-4 mr-2" />
+                      {lang === "ar" ? "قطع الاتصال" : "Disconnect"}
+                    </Button>
+                  ) : (
+                    <Button
                       onClick={async () => {
                         setSaving(true);
                         try {
@@ -3096,41 +3123,71 @@ export default function Dashboard() {
                         } finally {
                           setSaving(false);
                         }
-                      }} 
+                      }}
                       disabled={saving}
                       className="bg-green-600 hover:bg-green-700"
                     >
                       <Wifi className="h-4 w-4 mr-2" />
-                      {lang === "ar" ? "اتصال الآن" : "Connect Now"}
-                    </Button>
-                  ) : (
-                    <Button 
-                      variant="destructive"
-                      onClick={async () => {
-                        setSaving(true);
-                        try {
-                          const res = await fetch("/api/ib/disconnect", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ userId: "demo" })
-                          });
-                          const data = await res.json();
-                          if (data.success) {
-                            toast.success(lang === "ar" ? "تم قطع الاتصال" : "Disconnected");
-                            fetchData();
-                          }
-                        } catch (e) {
-                          toast.error(lang === "ar" ? "فشل قطع الاتصال" : "Disconnect failed");
-                        } finally {
-                          setSaving(false);
-                        }
-                      }} 
-                      disabled={saving}
-                    >
-                      <XCircle className="h-4 w-4 mr-2" />
-                      {lang === "ar" ? "قطع الاتصال" : "Disconnect"}
+                      {lang === "ar" ? "🔗 اتصال الآن" : "🔗 Connect Now"}
                     </Button>
                   )}
+                </div>
+
+                {/* Quick Actions */}
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <Button
+                    variant="outline"
+                    className="h-auto py-4 flex flex-col items-center gap-2"
+                    onClick={async () => {
+                      setSaving(true);
+                      try {
+                        await fetch("/api/settings", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ userId: "demo", accountType: "simulation" })
+                        });
+                        toast.success(lang === "ar" ? "تم التبديل إلى الوضع التجريبي" : "Switched to Simulation mode");
+                        fetchData();
+                      } catch (e) {
+                        toast.error(lang === "ar" ? "فشل" : "Failed");
+                      } finally {
+                        setSaving(false);
+                      }
+                    }}
+                  >
+                    <TestTube className="h-6 w-6 text-green-500" />
+                    <span className="font-bold">{lang === "ar" ? "وضع تجريبي" : "Simulation Mode"}</span>
+                    <span className="text-xs text-muted-foreground">{lang === "ar" ? "بدون IB - للتجربة" : "No IB needed - For testing"}</span>
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    className="h-auto py-4 flex flex-col items-center gap-2"
+                    onClick={async () => {
+                      setSaving(true);
+                      try {
+                        await fetch("/api/ib", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            action: "connect",
+                            userId: "demo",
+                            accountType: "paper"
+                          })
+                        });
+                        toast.success(lang === "ar" ? "تم التبديل إلى Paper Trading" : "Switched to Paper Trading");
+                        fetchData();
+                      } catch (e) {
+                        toast.error(lang === "ar" ? "فشل" : "Failed");
+                      } finally {
+                        setSaving(false);
+                      }
+                    }}
+                  >
+                    <Shield className="h-6 w-6 text-blue-500" />
+                    <span className="font-bold">{lang === "ar" ? "Paper Trading" : "Paper Trading"}</span>
+                    <span className="text-xs text-muted-foreground">{lang === "ar" ? "حساب تجريبي IB" : "IB Demo Account"}</span>
+                  </Button>
                 </div>
               </CardContent>
             </Card>
