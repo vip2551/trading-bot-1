@@ -666,6 +666,9 @@ export default function Dashboard() {
   const [ibPort, setIbPort] = useState("7497");
   const [ibClientId, setIbClientId] = useState("1");
 
+  // VPS Settings
+  const [vpsIP, setVpsIP] = useState("");
+
   // Telegram Settings
   const [telegramEnabled, setTelegramEnabled] = useState(false);
   const [telegramBotToken, setTelegramBotToken] = useState("");
@@ -845,6 +848,14 @@ export default function Dashboard() {
       clearInterval(autoTraderInterval);
     };
   }, [fetchData]);
+
+  // Load VPS IP from localStorage
+  useEffect(() => {
+    const savedVpsIP = localStorage.getItem("vpsIP");
+    if (savedVpsIP) {
+      setVpsIP(savedVpsIP);
+    }
+  }, []);
 
   // Check auth status
   const checkAuth = async () => {
@@ -2646,27 +2657,64 @@ export default function Dashboard() {
               </Card>
             )}
 
-            {/* VPS Settings */}
+            {/* Vultr VPS Settings */}
             <Card className="border-2 border-blue-500/20">
               <CardHeader className="bg-blue-500/5">
                 <CardTitle className="flex items-center gap-2 text-blue-600">
                   <Server className="h-5 w-5" />
-                  {lang === "ar" ? "إعدادات VPS" : "VPS Settings"}
+                  {lang === "ar" ? "إعدادات Vultr VPS" : "Vultr VPS Settings"}
                 </CardTitle>
                 <CardDescription>
-                  {lang === "ar" ? "إعدادات السيرفر الخاص بك" : "Your server configuration"}
+                  {lang === "ar" ? "إعدادات السيرفر من Vultr" : "Your Vultr server configuration"}
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-4 space-y-4">
+                {/* Vultr Provider */}
+                <div className="flex items-center gap-3 p-3 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-lg border">
+                  <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
+                    <Globe className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <p className="font-semibold">Vultr Cloud Compute</p>
+                    <p className="text-xs text-muted-foreground">{lang === "ar" ? "ابدأ من $6/شهر" : "Starting at $6/month"}</p>
+                  </div>
+                </div>
+
+                {/* VPS IP Input */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">{lang === "ar" ? "عنوان IP الـ VPS" : "VPS IP Address"}</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="مثال: 192.168.1.100"
+                      value={vpsIP}
+                      onChange={(e) => setVpsIP(e.target.value)}
+                      className="font-mono"
+                    />
+                    <Button variant="outline" size="sm" onClick={() => {
+                      if (vpsIP) {
+                        localStorage.setItem("vpsIP", vpsIP);
+                        toast.success(lang === "ar" ? "تم حفظ عنوان VPS" : "VPS IP saved");
+                      }
+                    }}>
+                      <Save className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {lang === "ar" 
+                      ? "أدخل IP الـ VPS من لوحة تحكم Vultr"
+                      : "Enter your VPS IP from Vultr dashboard"}
+                  </p>
+                </div>
+
                 {/* VPS Info */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-3 bg-muted/30 rounded-lg">
-                    <p className="text-xs text-muted-foreground mb-1">{lang === "ar" ? "عنوان VPS" : "VPS Address"}</p>
-                    <p className="font-mono font-semibold text-blue-600">66.135.0.8</p>
-                  </div>
-                  <div className="p-3 bg-muted/30 rounded-lg">
                     <p className="text-xs text-muted-foreground mb-1">{lang === "ar" ? "منفذ البوت" : "Bot Port"}</p>
                     <p className="font-mono font-semibold">3000</p>
+                  </div>
+                  <div className="p-3 bg-muted/30 rounded-lg">
+                    <p className="text-xs text-muted-foreground mb-1">{lang === "ar" ? "نظام التشغيل" : "OS"}</p>
+                    <p className="font-semibold">Ubuntu 22.04</p>
                   </div>
                 </div>
 
@@ -2694,21 +2742,24 @@ export default function Dashboard() {
                   <Label className="text-sm font-medium">{lang === "ar" ? "روابط سريعة" : "Quick Links"}</Label>
                   <div className="grid grid-cols-2 gap-2">
                     <Button variant="outline" size="sm" className="justify-start" onClick={() => {
-                      navigator.clipboard.writeText("ssh root@66.135.0.8");
+                      const ip = vpsIP || "YOUR_VPS_IP";
+                      navigator.clipboard.writeText(`ssh root@${ip}`);
                       toast.success(lang === "ar" ? "تم نسخ أمر SSH" : "SSH command copied");
                     }}>
                       <Terminal className="h-4 w-4 mr-2" />
                       SSH Command
                     </Button>
                     <Button variant="outline" size="sm" className="justify-start" onClick={() => {
-                      navigator.clipboard.writeText("http://66.135.0.8:3000/api/health");
+                      const ip = vpsIP || "YOUR_VPS_IP";
+                      navigator.clipboard.writeText(`http://${ip}:3000/api/health`);
                       toast.success(lang === "ar" ? "تم نسخ رابط Health" : "Health URL copied");
                     }}>
                       <Activity className="h-4 w-4 mr-2" />
                       Health Check
                     </Button>
                     <Button variant="outline" size="sm" className="justify-start" onClick={() => {
-                      navigator.clipboard.writeText("http://66.135.0.8:3000/api/webhook/tradingview");
+                      const ip = vpsIP || "YOUR_VPS_IP";
+                      navigator.clipboard.writeText(`http://${ip}:3000/api/webhook/tradingview`);
                       toast.success(lang === "ar" ? "تم نسخ رابط Webhook" : "Webhook URL copied");
                     }}>
                       <Radio className="h-4 w-4 mr-2" />
@@ -2724,38 +2775,46 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Deployment Checklist */}
+                {/* Vultr Quick Setup */}
                 <div className="border-t pt-4">
-                  <p className="text-sm font-medium mb-3">{lang === "ar" ? "قائمة النشر:" : "Deployment Checklist:"}</p>
-                  <ul className="text-sm space-y-2">
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-500" />
-                      {lang === "ar" ? "VPS جاهز: 66.135.0.8" : "VPS Ready: 66.135.0.8"}
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-500" />
-                      {lang === "ar" ? "رفع البوت إلى /opt/trading-bot" : "Upload bot to /opt/trading-bot"}
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-500" />
-                      {lang === "ar" ? "تشغيل bun install && bun run db:push" : "Run bun install && bun run db:push"}
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-500" />
-                      {lang === "ar" ? "تشغيل IB Gateway على المنفذ 7497" : "Run IB Gateway on port 7497"}
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-500" />
-                      {lang === "ar" ? "تشغيل pm2 start ecosystem.config.js" : "Run pm2 start ecosystem.config.js"}
-                    </li>
-                  </ul>
+                  <p className="text-sm font-medium mb-3">{lang === "ar" ? "خطوات الإعداد السريع:" : "Quick Setup Steps:"}</p>
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2 p-2 bg-muted/30 rounded">
+                      <span className="w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs font-bold">1</span>
+                      <div>
+                        <p className="text-sm font-medium">{lang === "ar" ? "إنشاء VPS" : "Create VPS"}</p>
+                        <p className="text-xs text-muted-foreground">{lang === "ar" ? "اختر Ubuntu 22.04 - $6/شهر" : "Choose Ubuntu 22.04 - $6/month"}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2 p-2 bg-muted/30 rounded">
+                      <span className="w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs font-bold">2</span>
+                      <div>
+                        <p className="text-sm font-medium">{lang === "ar" ? "الاتصال بـ SSH" : "Connect via SSH"}</p>
+                        <p className="text-xs text-muted-foreground font-mono">ssh root@YOUR_IP</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2 p-2 bg-muted/30 rounded">
+                      <span className="w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs font-bold">3</span>
+                      <div>
+                        <p className="text-sm font-medium">{lang === "ar" ? "تثبيت المتطلبات" : "Install Requirements"}</p>
+                        <p className="text-xs text-muted-foreground font-mono">curl -fsSL https://bun.sh/install | bash</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2 p-2 bg-muted/30 rounded">
+                      <span className="w-5 h-5 bg-blue-500 text-white rounded-full flex items-center justify-center text-xs font-bold">4</span>
+                      <div>
+                        <p className="text-sm font-medium">{lang === "ar" ? "رفع وتشغيل البوت" : "Upload & Start Bot"}</p>
+                        <p className="text-xs text-muted-foreground font-mono">pm2 start ecosystem.config.js</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="p-3 bg-green-500/5 rounded-lg border border-green-500/20">
                   <p className="text-sm text-green-600">
                     {lang === "ar" 
-                      ? "✅ البوت سيعمل 24/7 على VPS حتى لو أغلقت المتصفح أو أطفأت جهازك"
-                      : "✅ Bot will run 24/7 on VPS even if you close browser or turn off your device"}
+                      ? "✅ البوت سيعمل 24/7 على Vultr VPS حتى لو أغلقت المتصفح"
+                      : "✅ Bot will run 24/7 on Vultr VPS even if you close browser"}
                   </p>
                 </div>
               </CardContent>
@@ -2771,12 +2830,30 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent className="space-y-2">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 start trading-bot</div>
-                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 stop trading-bot</div>
-                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 restart trading-bot</div>
-                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 logs trading-bot</div>
-                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 status</div>
-                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 monit</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm cursor-pointer hover:bg-muted/80" onClick={() => {
+                    navigator.clipboard.writeText("pm2 start trading-bot");
+                    toast.success(lang === "ar" ? "تم النسخ" : "Copied");
+                  }}>pm2 start trading-bot</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm cursor-pointer hover:bg-muted/80" onClick={() => {
+                    navigator.clipboard.writeText("pm2 stop trading-bot");
+                    toast.success(lang === "ar" ? "تم النسخ" : "Copied");
+                  }}>pm2 stop trading-bot</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm cursor-pointer hover:bg-muted/80" onClick={() => {
+                    navigator.clipboard.writeText("pm2 restart trading-bot");
+                    toast.success(lang === "ar" ? "تم النسخ" : "Copied");
+                  }}>pm2 restart trading-bot</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm cursor-pointer hover:bg-muted/80" onClick={() => {
+                    navigator.clipboard.writeText("pm2 logs trading-bot");
+                    toast.success(lang === "ar" ? "تم النسخ" : "Copied");
+                  }}>pm2 logs trading-bot</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm cursor-pointer hover:bg-muted/80" onClick={() => {
+                    navigator.clipboard.writeText("pm2 status");
+                    toast.success(lang === "ar" ? "تم النسخ" : "Copied");
+                  }}>pm2 status</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm cursor-pointer hover:bg-muted/80" onClick={() => {
+                    navigator.clipboard.writeText("pm2 monit");
+                    toast.success(lang === "ar" ? "تم النسخ" : "Copied");
+                  }}>pm2 monit</div>
                 </div>
               </CardContent>
             </Card>
