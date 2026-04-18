@@ -128,9 +128,8 @@ model User {
   // Subscription
   subscription  Subscription?
   payments      Payment[]
-  
-  // Bot Settings
-  botSettings   BotSettings?
+
+  // Bot Settings - removed relation
   trades        Trade[]              @relation("UserTrades")
   signals       TradingViewSignal[]  @relation("UserSignals")
   
@@ -261,8 +260,7 @@ model NotificationSettings {
 // Bot Settings
 model BotSettings {
   id                  String   @id @default(cuid())
-  userId              String?  @unique
-  user                User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId              String?
   
   isRunning           Boolean  @default(false)
   

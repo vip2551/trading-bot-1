@@ -4,45 +4,35 @@ import { db } from '@/lib/db';
 // GET - Fetch bot settings
 export async function GET(request: NextRequest) {
   try {
-    // Get any settings (don't require user)
+    // Get any settings
     let settings = await db.botSettings.findFirst();
 
     if (!settings) {
-      // Create default settings without user (make userId nullable)
-      try {
-        settings = await db.botSettings.create({
-          data: {
-            userId: 'demo',
-            accountType: 'PAPER',
-            ibHost: '127.0.0.1',
-            ibPort: 7497,
-            ibClientId: 1,
-            ibConnected: false,
-            isRunning: false,
-            telegramEnabled: false,
-            telegramBotToken: null,
-            telegramChatId: null,
-            defaultQuantity: 1,
-            maxRiskPerTrade: 500,
-            defaultExpiry: '0DTE',
-            positionSizeMode: 'AMOUNT',
-            positionSizePercent: 5,
-            positionSizeAmount: 500,
-            spxStrikeOffset: 5,
-            spxDeltaTarget: 0.3,
-            strikeSelectionMode: 'MANUAL',
-            contractPriceMin: 300,
-            contractPriceMax: 400,
-          }
-        });
-      } catch (createError) {
-        // If creation fails (e.g., foreign key), just return defaults
-        console.log('Could not create settings, returning defaults');
-        return NextResponse.json({
-          success: true,
-          settings: getDefaultSettings()
-        });
-      }
+      // Create default settings
+      settings = await db.botSettings.create({
+        data: {
+          accountType: 'PAPER',
+          ibHost: '127.0.0.1',
+          ibPort: 7497,
+          ibClientId: 1,
+          ibConnected: false,
+          isRunning: false,
+          telegramEnabled: false,
+          telegramBotToken: null,
+          telegramChatId: null,
+          defaultQuantity: 1,
+          maxRiskPerTrade: 500,
+          defaultExpiry: '0DTE',
+          positionSizeMode: 'AMOUNT',
+          positionSizePercent: 5,
+          positionSizeAmount: 500,
+          spxStrikeOffset: 5,
+          spxDeltaTarget: 0.3,
+          strikeSelectionMode: 'MANUAL',
+          contractPriceMin: 300,
+          contractPriceMax: 400,
+        }
+      });
     }
 
     return NextResponse.json({
@@ -89,39 +79,26 @@ export async function POST(request: NextRequest) {
     // Get any existing settings
     let settings = await db.botSettings.findFirst();
 
+    const dataToUpdate = {
+      ...settingsData,
+      ibPort: settingsData.ibPort ? parseInt(settingsData.ibPort) : undefined,
+      ibClientId: settingsData.ibClientId ? parseInt(settingsData.ibClientId) : undefined,
+    };
+
     if (!settings) {
-      // Try to create new settings
-      try {
-        settings = await db.botSettings.create({
-          data: {
-            userId: 'demo',
-            ...settingsData,
-            ibPort: settingsData.ibPort ? parseInt(settingsData.ibPort) : 7497,
-            ibClientId: settingsData.ibClientId ? parseInt(settingsData.ibClientId) : 1,
-          }
-        });
-      } catch (createError) {
-        console.error('Create error:', createError);
-        // Return success anyway with default values
-        return NextResponse.json({
-          success: true,
-          message: 'Settings saved (demo mode)',
-          settings: { ...getDefaultSettings(), ...settingsData }
-        });
-      }
+      // Create new settings
+      settings = await db.botSettings.create({
+        data: dataToUpdate
+      });
     } else {
       // Update existing settings
       settings = await db.botSettings.update({
         where: { id: settings.id },
-        data: {
-          ...settingsData,
-          ibPort: settingsData.ibPort ? parseInt(settingsData.ibPort) : undefined,
-          ibClientId: settingsData.ibClientId ? parseInt(settingsData.ibClientId) : undefined,
-        }
+        data: dataToUpdate
       });
     }
 
-    console.log('Settings saved successfully');
+    console.log('Settings saved successfully:', settings.id);
 
     return NextResponse.json({
       success: true,
