@@ -24,9 +24,7 @@ export async function GET(request: NextRequest) {
         orderBy: { createdAt: 'desc' },
       });
 
-      settings = await db.botSettings.findUnique({
-        where: { userId },
-      });
+      settings = await db.botSettings.findFirst();
     } catch {
       console.log('Database not available, using defaults');
     }

@@ -2537,7 +2537,7 @@ export default function Dashboard() {
                         <li>{lang === "ar" ? "يكتشف الاتجاهات القوية ويحدد نقاط الدخول والخروج" : "Detects strong trends and determines entry/exit points"}</li>
                         <li>{lang === "ar" ? "يفتح صفقات تلقائياً عند توفر إشارات قوية" : "Opens trades automatically when strong signals appear"}</li>
                         <li>{lang === "ar" ? "يغلق الصفقات عند تحقيق الهدف أو وقف الخسارة" : "Closes trades at take profit or stop loss"}</li>
-                        <li>{lang === "ar" ? "يعمل على خادم Railway بدون الحاجة لفتح المتصفح" : "Runs on Railway server without needing to open browser"}</li>
+                        <li>{lang === "ar" ? "يعمل على السيرفر أو VPS بدون الحاجة لفتح المتصفح" : "Runs on server or VPS without needing to open browser"}</li>
                       </ul>
                     </div>
                   </div>
@@ -2649,7 +2649,7 @@ export default function Dashboard() {
               <CardHeader className="bg-amber-500/5">
                 <CardTitle className="flex items-center gap-2 text-amber-600">
                   <Globe className="h-5 w-5" />
-                  {lang === "ar" ? "التشغيل على السيرفر (Railway)" : "Running on Server (Railway)"}
+                  {lang === "ar" ? "التشغيل على السيرفر (VPS)" : "Running on Server (VPS)"}
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-4">
@@ -2662,7 +2662,7 @@ export default function Dashboard() {
                   <ul className="text-sm space-y-2">
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-500" />
-                      {lang === "ar" ? "نشر المشروع على Railway" : "Project deployed to Railway"}
+                      {lang === "ar" ? "نشر المشروع على VPS أو سيرفر خاص" : "Project deployed to VPS or private server"}
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-500" />
@@ -2680,8 +2680,8 @@ export default function Dashboard() {
                   <div className="p-3 bg-green-500/5 rounded-lg border border-green-500/20 mt-4">
                     <p className="text-sm text-green-600">
                       {lang === "ar" 
-                        ? "✅ البوت سيعمل 24/7 على Railway حتى لو أغلقت المتصفح أو أطفأت جهازك"
-                        : "✅ Bot will run 24/7 on Railway even if you close browser or turn off your device"}
+                        ? "✅ البوت سيعمل 24/7 على VPS حتى لو أغلقت المتصفح أو أطفأت جهازك"
+                        : "✅ Bot will run 24/7 on VPS even if you close browser or turn off your device"}
                     </p>
                   </div>
                 </div>
