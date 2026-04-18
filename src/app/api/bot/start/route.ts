@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     console.log('Starting bot for user:', userId);
 
     // Get or create settings
-    let settings = await db.botSettings.findUnique({
+    let settings = await db.botSettings.findFirst({
       where: { userId },
     });
 

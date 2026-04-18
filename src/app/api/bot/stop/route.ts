@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
 
     console.log('Stopping bot for user:', userId);
 
-    let settings = await db.botSettings.findUnique({
+    let settings = await db.botSettings.findFirst({
       where: { userId },
     });
 
