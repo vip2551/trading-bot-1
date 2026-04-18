@@ -62,6 +62,8 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Eye,
+  Server,
+  Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -2644,46 +2646,137 @@ export default function Dashboard() {
               </Card>
             )}
 
-            {/* Deployment Info */}
-            <Card className="border-2 border-amber-500/20">
-              <CardHeader className="bg-amber-500/5">
-                <CardTitle className="flex items-center gap-2 text-amber-600">
-                  <Globe className="h-5 w-5" />
-                  {lang === "ar" ? "التشغيل على السيرفر (VPS)" : "Running on Server (VPS)"}
+            {/* VPS Settings */}
+            <Card className="border-2 border-blue-500/20">
+              <CardHeader className="bg-blue-500/5">
+                <CardTitle className="flex items-center gap-2 text-blue-600">
+                  <Server className="h-5 w-5" />
+                  {lang === "ar" ? "إعدادات VPS" : "VPS Settings"}
                 </CardTitle>
+                <CardDescription>
+                  {lang === "ar" ? "إعدادات السيرفر الخاص بك" : "Your server configuration"}
+                </CardDescription>
               </CardHeader>
-              <CardContent className="pt-4">
-                <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    {lang === "ar" 
-                      ? "لجعل البوت يعمل بدون فتح المتصفح، تأكد من:"
-                      : "To make the bot work without opening browser, ensure:"}
-                  </p>
+              <CardContent className="pt-4 space-y-4">
+                {/* VPS Info */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 bg-muted/30 rounded-lg">
+                    <p className="text-xs text-muted-foreground mb-1">{lang === "ar" ? "عنوان VPS" : "VPS Address"}</p>
+                    <p className="font-mono font-semibold text-blue-600">66.135.0.8</p>
+                  </div>
+                  <div className="p-3 bg-muted/30 rounded-lg">
+                    <p className="text-xs text-muted-foreground mb-1">{lang === "ar" ? "منفذ البوت" : "Bot Port"}</p>
+                    <p className="font-mono font-semibold">3000</p>
+                  </div>
+                </div>
+
+                {/* IB Gateway Ports */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">{lang === "ar" ? "منافذ IB Gateway" : "IB Gateway Ports"}</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="p-2 bg-emerald-500/10 rounded border border-emerald-500/20 text-center">
+                      <p className="text-xs text-emerald-600">{lang === "ar" ? "ورقي" : "Paper"}</p>
+                      <p className="font-mono font-bold">7497</p>
+                    </div>
+                    <div className="p-2 bg-red-500/10 rounded border border-red-500/20 text-center">
+                      <p className="text-xs text-red-600">{lang === "ar" ? "حقيقي" : "Live"}</p>
+                      <p className="font-mono font-bold">7496</p>
+                    </div>
+                    <div className="p-2 bg-blue-500/10 rounded border border-blue-500/20 text-center">
+                      <p className="text-xs text-blue-600">{lang === "ar" ? "Gateway" : "Gateway"}</p>
+                      <p className="font-mono font-bold">4001</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick Links */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">{lang === "ar" ? "روابط سريعة" : "Quick Links"}</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button variant="outline" size="sm" className="justify-start" onClick={() => {
+                      navigator.clipboard.writeText("ssh root@66.135.0.8");
+                      toast.success(lang === "ar" ? "تم نسخ أمر SSH" : "SSH command copied");
+                    }}>
+                      <Terminal className="h-4 w-4 mr-2" />
+                      SSH Command
+                    </Button>
+                    <Button variant="outline" size="sm" className="justify-start" onClick={() => {
+                      navigator.clipboard.writeText("http://66.135.0.8:3000/api/health");
+                      toast.success(lang === "ar" ? "تم نسخ رابط Health" : "Health URL copied");
+                    }}>
+                      <Activity className="h-4 w-4 mr-2" />
+                      Health Check
+                    </Button>
+                    <Button variant="outline" size="sm" className="justify-start" onClick={() => {
+                      navigator.clipboard.writeText("http://66.135.0.8:3000/api/webhook/tradingview");
+                      toast.success(lang === "ar" ? "تم نسخ رابط Webhook" : "Webhook URL copied");
+                    }}>
+                      <Radio className="h-4 w-4 mr-2" />
+                      Webhook URL
+                    </Button>
+                    <Button variant="outline" size="sm" className="justify-start" onClick={() => {
+                      navigator.clipboard.writeText("pm2 logs trading-bot");
+                      toast.success(lang === "ar" ? "تم نسخ أمر السجلات" : "Logs command copied");
+                    }}>
+                      <FileText className="h-4 w-4 mr-2" />
+                      PM2 Logs
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Deployment Checklist */}
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium mb-3">{lang === "ar" ? "قائمة النشر:" : "Deployment Checklist:"}</p>
                   <ul className="text-sm space-y-2">
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-500" />
-                      {lang === "ar" ? "نشر المشروع على VPS أو سيرفر خاص" : "Project deployed to VPS or private server"}
+                      {lang === "ar" ? "VPS جاهز: 66.135.0.8" : "VPS Ready: 66.135.0.8"}
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-500" />
-                      {lang === "ar" ? "تشغيل التداول التلقائي من هذه الصفحة" : "Enable auto trading from this page"}
+                      {lang === "ar" ? "رفع البوت إلى /opt/trading-bot" : "Upload bot to /opt/trading-bot"}
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-500" />
-                      {lang === "ar" ? "الاتصال بـ Interactive Brokers (اختياري)" : "Connect to Interactive Brokers (optional)"}
+                      {lang === "ar" ? "تشغيل bun install && bun run db:push" : "Run bun install && bun run db:push"}
                     </li>
                     <li className="flex items-center gap-2">
                       <CheckCircle className="h-4 w-4 text-green-500" />
-                      {lang === "ar" ? "تفعيل إشعارات تيليجرام لمتابعة الصفقات" : "Enable Telegram notifications to track trades"}
+                      {lang === "ar" ? "تشغيل IB Gateway على المنفذ 7497" : "Run IB Gateway on port 7497"}
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      {lang === "ar" ? "تشغيل pm2 start ecosystem.config.js" : "Run pm2 start ecosystem.config.js"}
                     </li>
                   </ul>
-                  <div className="p-3 bg-green-500/5 rounded-lg border border-green-500/20 mt-4">
-                    <p className="text-sm text-green-600">
-                      {lang === "ar" 
-                        ? "✅ البوت سيعمل 24/7 على VPS حتى لو أغلقت المتصفح أو أطفأت جهازك"
-                        : "✅ Bot will run 24/7 on VPS even if you close browser or turn off your device"}
-                    </p>
-                  </div>
+                </div>
+
+                <div className="p-3 bg-green-500/5 rounded-lg border border-green-500/20">
+                  <p className="text-sm text-green-600">
+                    {lang === "ar" 
+                      ? "✅ البوت سيعمل 24/7 على VPS حتى لو أغلقت المتصفح أو أطفأت جهازك"
+                      : "✅ Bot will run 24/7 on VPS even if you close browser or turn off your device"}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* PM2 Commands */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Terminal className="h-5 w-5" />
+                  {lang === "ar" ? "أوامر PM2" : "PM2 Commands"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 start trading-bot</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 stop trading-bot</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 restart trading-bot</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 logs trading-bot</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 status</div>
+                  <div className="p-2 bg-muted rounded font-mono text-sm">pm2 monit</div>
                 </div>
               </CardContent>
             </Card>
