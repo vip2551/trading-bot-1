@@ -11,15 +11,21 @@ export async function GET(request: NextRequest) {
     // Get settings (any user or create default)
     let settings = await db.botSettings.findFirst();
 
-    // Check if we're in simulation mode (no IB needed)
+    // Check if we're in simulation mode
     const accountType = settings?.accountType || 'simulation';
     const isSimulation = accountType === 'simulation' || accountType === 'SIMULATION';
     
-    // Check actual IB connection status
+    // Check actual IB connection status (for real IB connections)
     const isActuallyConnected = ibService.isConnected();
     
-    // In simulation mode, always show as "connected" for demo purposes
-    const effectiveConnected = isSimulation ? true : (isActuallyConnected || settings?.ibConnected || false);
+    // Check database connection flag
+    const dbConnected = settings?.ibConnected || false;
+    
+    // For simulation mode: check database flag
+    // For real IB: check actual connection OR database flag
+    const effectiveConnected = isSimulation 
+      ? dbConnected  // Simulation: use database flag only
+      : (isActuallyConnected || dbConnected);  // Real IB: check both
 
     const status = {
       configured: !!(settings?.ibHost && settings?.ibPort),
@@ -30,10 +36,12 @@ export async function GET(request: NextRequest) {
       accountType: accountType,
       clientId: settings?.ibClientId || 1,
       message: isSimulation 
-        ? 'Simulation mode - no IB connection required'
+        ? (dbConnected ? 'وضع تجريبي - متصل' : 'وضع تجريبي - غير متصل')
         : isActuallyConnected 
-          ? '✅ Connected to IB TWS/Gateway'
-          : '❌ Not connected - Click Connect button'
+          ? '✅ متصل بـ IB TWS/Gateway'
+          : dbConnected 
+            ? '✅ جاهز للاتصال'
+            : '❌ غير متصل - اضغط زر الاتصال'
     };
 
     return NextResponse.json({

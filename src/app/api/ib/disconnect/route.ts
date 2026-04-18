@@ -10,17 +10,22 @@ export async function POST(request: NextRequest) {
 
     console.log('[IB Disconnect] Disconnecting...');
 
-    // Disconnect from IB service
-    await ibService.disconnect();
+    // Disconnect from IB service (real connection)
+    try {
+      await ibService.disconnect();
+    } catch (e) {
+      console.log('[IB Disconnect] No real connection to disconnect');
+    }
 
-    // Update database
+    // Update database - mark as disconnected and stop bot
     const settings = await db.botSettings.findFirst();
     if (settings) {
       await db.botSettings.update({
         where: { id: settings.id },
         data: { 
           ibConnected: false,
-          isRunning: false 
+          isRunning: false,
+          // Keep accountType as is, just disconnect
         }
       });
     }
@@ -29,7 +34,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ 
       success: true, 
-      message: 'Disconnected from IB TWS/Gateway' 
+      message: 'تم قطع الاتصال بنجاح',
+      connected: false
     });
   } catch (error: any) {
     console.error('IB Disconnect Error:', error);
