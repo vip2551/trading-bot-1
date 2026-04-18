@@ -1,13 +1,17 @@
 [realtime-service] Installing dependencies...
-bun install v1.3.10 (30e609e0)
+bun install v1.3.12 (700fc117)
 
-Checked 22 installs across 23 packages (no changes) [11.00ms]
++ socket.io@4.8.3
+
+22 packages installed [191.00ms]
 [realtime-service] Running bun run dev...
 $ bun --hot index.ts
 46 |     }
 47 |   }
-48 |   let er;error: script "dev" was terminated by signal SIGKILL (Forced quit)
-er;
+48 |   let er;
+49 |   if (args.length > 0)
+50 |     er = args[0];
+51 |     throw er;
                  ^
 error: Failed to start server. Is port 3004 in use?
       at emitError (node:events:51:13)

@@ -1,0 +1,10 @@
+[auto-trader] Installing dependencies...
+bun install v1.3.12 (700fc117)
+No packages! Deleted empty lockfile
+
+[1.00ms] done
+[auto-trader] Running bun run dev...
+$ bun --hot run index.ts
+🤖 Auto Trading Engine starting...
+📡 Port: 3005
+✅ Auto Trading Engine running
