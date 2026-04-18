@@ -73,25 +73,85 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - Get custom analysis
+// POST - Get custom analysis or market analysis
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userId, question } = body;
+    const { userId, question, symbol, type } = body;
 
-    // Simple response generator
-    const analysis = generateCustomResponse(question);
+    // If symbol is provided, do market analysis
+    if (symbol || type === 'market') {
+      const analysis = generateMarketAnalysis(symbol || 'SPX');
+      return NextResponse.json({
+        success: true,
+        analysis,
+        symbol: symbol || 'SPX',
+      });
+    }
 
+    // If type is specified, do specific analysis
+    if (type) {
+      let recentTrades: any[] = [];
+      let settings: any = null;
+      
+      try {
+        recentTrades = await db.trade.findMany({
+          where: { userId: userId || 'demo' },
+          take: 50,
+          orderBy: { createdAt: 'desc' },
+        });
+        settings = await db.botSettings.findFirst();
+      } catch {
+        console.log('Database not available');
+      }
+
+      const closedTrades = recentTrades.filter(t => t.status === 'CLOSED');
+      const wins = closedTrades.filter(t => (t.pnl || 0) > 0);
+      const losses = closedTrades.filter(t => (t.pnl || 0) < 0);
+      const totalPnL = closedTrades.reduce((s, t) => s + (t.pnl || 0), 0);
+      const winRate = closedTrades.length ? (wins.length / closedTrades.length) * 100 : 0;
+
+      let analysis = '';
+      switch (type) {
+        case 'performance':
+          analysis = generatePerformanceAnalysis(winRate, totalPnL, wins.length, losses.length, closedTrades.length);
+          break;
+        case 'risk':
+          analysis = generateRiskAnalysis(winRate, totalPnL, settings);
+          break;
+        default:
+          analysis = generateGeneralAnalysis(winRate, totalPnL, wins.length, losses.length);
+      }
+
+      return NextResponse.json({
+        success: true,
+        analysis,
+        analysisType: type,
+      });
+    }
+
+    // Custom question response
+    if (question) {
+      const analysis = generateCustomResponse(question);
+      return NextResponse.json({
+        success: true,
+        analysis,
+        question,
+      });
+    }
+
+    // Default: return market analysis
+    const analysis = generateMarketAnalysis('SPX');
     return NextResponse.json({
       success: true,
-      answer: analysis,
-      question,
+      analysis,
+      symbol: 'SPX',
     });
 
   } catch (error) {
     console.error('AI Q&A error:', error);
     return NextResponse.json(
-      { error: 'Failed to answer question' },
+      { error: 'Failed to generate analysis' },
       { status: 500 }
     );
   }
@@ -133,25 +193,38 @@ function generatePerformanceAnalysis(winRate: number, totalPnL: number, wins: nu
   return analysis;
 }
 
-function generateMarketAnalysis(settings: any): string {
+function generateMarketAnalysis(symbol?: string): string {
   const isArabic = true;
+  const targetSymbol = symbol || 'SPX';
   
   let analysis = `## 🌐 ${isArabic ? 'نظرة السوق' : 'Market Outlook'}\n\n`;
   
+  // Add current time context
+  const now = new Date();
+  const hour = now.getUTCHours();
+  const marketOpen = hour >= 13 && hour <= 21; // US market hours in UTC
+  
   analysis += `### 📊 ${isArabic ? 'معنويات السوق الحالية' : 'Current Market Sentiment'}\n`;
-  analysis += isArabic ? '- **الاتجاه العام**: صعودي مع حذر\n' : '- **Overall Trend**: Cautiously Bullish\n';
-  analysis += isArabic ? '- **التقلبات**: متوسطة\n' : '- **Volatility**: Moderate\n';
-  analysis += isArabic ? '- **حجم التداول**: طبيعي\n' : '- **Volume**: Normal\n\n';
+  analysis += isArabic ? `- **الرمز**: ${targetSymbol}\n` : `- **Symbol**: ${targetSymbol}\n`;
+  analysis += isArabic ? `- **حالة السوق**: ${marketOpen ? 'مفتوح 🟢' : 'مغلق 🔴'}\n` : `- **Market Status**: ${marketOpen ? 'Open 🟢' : 'Closed 🔴'}\n`;
+  analysis += isArabic ? `- **الاتجاه العام**: صعودي مع حذر\n` : `- **Overall Trend**: Cautiously Bullish\n`;
+  analysis += isArabic ? `- **التقلبات**: متوسطة\n` : `- **Volatility**: Moderate\n`;
+  analysis += isArabic ? `- **حجم التداول**: طبيعي\n\n` : `- **Volume**: Normal\n\n`;
   
   analysis += `### 🎯 ${isArabic ? 'الاستراتيجيات الموصى بها' : 'Recommended Strategies'}\n`;
   analysis += isArabic ? '1. **SPX 0DTE**: ابحث عن فرص CALL عند الدعم\n' : '1. **SPX 0DTE**: Look for CALL opportunities at support\n';
   analysis += isArabic ? '2. **التحوط**: استخدم PUT كحماية\n' : '2. **Hedging**: Use PUTs for protection\n';
-  analysis += isArabic ? '3. **إدارة المخاطر**: لا تخاطر بأكثر من 2% في الصفقة الواحدة\n' : '3. **Risk Management**: Risk no more than 2% per trade\n\n';
+  analysis += isArabic ? '3. **إدارة المخاطر**: لا تخاطر بأكثر من 2% في الصفقة الواحدة\n\n' : '3. **Risk Management**: Risk no more than 2% per trade\n\n';
   
   analysis += `### ⚠️ ${isArabic ? 'مستويات مهمة للمراقبة' : 'Key Levels to Watch'}\n`;
   analysis += isArabic ? '- **مقاومة SPX**: 5100\n' : '- **SPX Resistance**: 5100\n';
   analysis += isArabic ? '- **دعم SPX**: 5050\n' : '- **SPX Support**: 5050\n';
   analysis += isArabic ? '- **VIX**: 15-18\n' : '- **VIX**: 15-18\n';
+  
+  analysis += `\n### 💡 ${isArabic ? 'نصيحة للتداول' : 'Trading Tip'}\n`;
+  analysis += isArabic 
+    ? '> "انتظر تأكيد الإشارة قبل الدخول في الصفقة"\n'
+    : '> "Wait for signal confirmation before entering a trade"\n';
   
   return analysis;
 }
