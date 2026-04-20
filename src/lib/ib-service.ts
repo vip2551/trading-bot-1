@@ -72,6 +72,12 @@ export class IBService {
   private accountSummary: IBAccountSummary | null = null;
   private positions: IBPosition[] = [];
   private connectionPromise: { resolve: (value: { success: boolean; message: string }) => void; reject: (reason?: any) => void } | null = null;
+  // Auto-reconnect settings
+  private autoReconnect: boolean = true;
+  private maxReconnectAttempts: number = 5;
+  private reconnectAttempts: number = 0;
+  private reconnectDelay: number = 5000; // 5 seconds
+  private isReconnecting: boolean = false;
 
   constructor() {
     this.initEventListeners();
@@ -315,6 +321,35 @@ export class IBService {
     this.ib.on('tickSize', (tickerId: number, field: number, size: number) => {
       this.emit('marketData', { tickerId, field, size });
     });
+  }
+
+  // Auto-reconnect handler
+  private async handleReconnect(): Promise<void> {
+    if (this.isReconnecting || !this.config) return;
+    
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+    
+    console.log(`[IB] Auto-reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}...`);
+    
+    await new Promise(resolve => setTimeout(resolve, this.reconnectDelay));
+    
+    try {
+      const result = await this.connect();
+      if (result.success) {
+        console.log('[IB] Auto-reconnect successful');
+        this.reconnectAttempts = 0;
+      } else {
+        console.log('[IB] Auto-reconnect failed:', result.message);
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.handleReconnect();
+        }
+      }
+    } catch (error) {
+      console.error('[IB] Auto-reconnect error:', error);
+    }
+    
+    this.isReconnecting = false;
   }
 
   // Disconnect from IB
