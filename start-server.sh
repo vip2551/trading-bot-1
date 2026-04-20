@@ -23,10 +23,6 @@ fi
 echo "📦 Generating Prisma client..."
 bunx prisma generate
 
-# Run database migrations
-echo "📊 Running database migrations..."
-bunx prisma db push --skip-generate 2>/dev/null || true
-
 # Build for production
 echo "🔨 Building for production..."
 bun run build
