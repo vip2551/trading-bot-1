@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ 
         success: false, 
         error: result.message 
-      }, { status: 200 });
+      }, { status: 400 });
     }
   } catch (error: any) {
     console.error('IB Connect Error:', error);

@@ -21,11 +21,11 @@ export async function GET(request: NextRequest) {
     // Check database connection flag
     const dbConnected = settings?.ibConnected || false;
     
-    // For simulation mode: check database flag
-    // For real IB: check actual connection OR database flag
+    // IMPORTANT: For real IB accounts, rely ONLY on actual connection
+    // For simulation mode, use database flag
     const effectiveConnected = isSimulation 
       ? dbConnected  // Simulation: use database flag only
-      : (isActuallyConnected || dbConnected);  // Real IB: check both
+      : isActuallyConnected;  // Real IB: check actual connection only (not database)
 
     const status = {
       configured: !!(settings?.ibHost && settings?.ibPort),
@@ -203,11 +203,11 @@ export async function POST(request: NextRequest) {
           }
         });
       } else {
-        // Connection failed
+        // Connection failed - return proper error status
         return NextResponse.json({ 
           success: false, 
           error: result.message 
-        }, { status: 200 });
+        }, { status: 400 });
       }
     }
 

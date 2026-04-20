@@ -8,9 +8,11 @@
     "start": "next start -H 0.0.0.0 -p ${PORT:-3000}",
     "lint": "eslint .",
     "start:railway": "bash start-railway.sh",
-    "postinstall": "echo 'Skipping postinstall'",
+    "postinstall": "prisma generate",
     "db:push": "prisma db push",
-    "db:migrate": "prisma migrate deploy"
+    "db:migrate": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "prod": "bun run build && bun run start"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.1.1",

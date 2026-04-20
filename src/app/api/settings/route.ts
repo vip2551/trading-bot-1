@@ -23,14 +23,44 @@ export async function GET(request: NextRequest) {
           defaultQuantity: 1,
           maxRiskPerTrade: 500,
           defaultExpiry: '0DTE',
-          positionSizeMode: 'AMOUNT',
+          positionSizeMode: 'FIXED',
           positionSizePercent: 5,
           positionSizeAmount: 500,
           spxStrikeOffset: 5,
           spxDeltaTarget: 0.3,
-          strikeSelectionMode: 'MANUAL',
+          strikeSelectionMode: 'CONTRACT_PRICE',
           contractPriceMin: 300,
           contractPriceMax: 400,
+          // New advanced settings
+          tradingMode: 'BALANCED',
+          activeSymbols: 'SPX',
+          primarySymbol: 'SPX',
+          contractSizeMode: 'FIXED',
+          fixedContracts: 1,
+          contractsPercentage: 2.0,
+          contractsRiskAmount: 100.0,
+          minContracts: 1,
+          maxContracts: 10,
+          minConfidenceConservative: 80.0,
+          minConfidenceBalanced: 70.0,
+          minConfidenceAggressive: 60.0,
+          useRSI: true,
+          useMACD: true,
+          useBollinger: true,
+          useEMA: true,
+          useADX: true,
+          detectExplosions: true,
+          detectReversals: true,
+          detectInstitutional: true,
+          detectSupplyDemand: true,
+          explosionVolumeThreshold: 2.0,
+          explosionVolatilityThreshold: 1.5,
+          autoTradingEnabled: false,
+          autoTradingStartTime: '09:30',
+          autoTradingEndTime: '16:00',
+          processTradingViewSignals: true,
+          autoSelectStrike: true,
+          autoDetermineDirection: true,
         }
       });
     }
@@ -45,7 +75,7 @@ export async function GET(request: NextRequest) {
         ibPort: settings.ibPort || 7497,
         ibClientId: settings.ibClientId || 1,
         ibConnected: settings.ibConnected || false,
-        strikeSelectionMode: settings.strikeSelectionMode || 'OFFSET',
+        strikeSelectionMode: settings.strikeSelectionMode || 'CONTRACT_PRICE',
         contractPriceMin: settings.contractPriceMin || 300,
         contractPriceMax: settings.contractPriceMax || 400,
         spxStrikeOffset: settings.spxStrikeOffset || 5,
@@ -57,6 +87,36 @@ export async function GET(request: NextRequest) {
         maxOpenPositions: settings.maxOpenPositions || 3,
         maxDailyLoss: settings.maxDailyLoss || 1000,
         defaultQuantity: settings.defaultQuantity || 1,
+        // New advanced settings
+        tradingMode: settings.tradingMode || 'BALANCED',
+        activeSymbols: settings.activeSymbols || 'SPX',
+        primarySymbol: settings.primarySymbol || 'SPX',
+        contractSizeMode: settings.contractSizeMode || 'FIXED',
+        fixedContracts: settings.fixedContracts || 1,
+        contractsPercentage: settings.contractsPercentage || 2.0,
+        contractsRiskAmount: settings.contractsRiskAmount || 100.0,
+        minContracts: settings.minContracts || 1,
+        maxContracts: settings.maxContracts || 10,
+        minConfidenceConservative: settings.minConfidenceConservative || 80.0,
+        minConfidenceBalanced: settings.minConfidenceBalanced || 70.0,
+        minConfidenceAggressive: settings.minConfidenceAggressive || 60.0,
+        useRSI: settings.useRSI ?? true,
+        useMACD: settings.useMACD ?? true,
+        useBollinger: settings.useBollinger ?? true,
+        useEMA: settings.useEMA ?? true,
+        useADX: settings.useADX ?? true,
+        detectExplosions: settings.detectExplosions ?? true,
+        detectReversals: settings.detectReversals ?? true,
+        detectInstitutional: settings.detectInstitutional ?? true,
+        detectSupplyDemand: settings.detectSupplyDemand ?? true,
+        explosionVolumeThreshold: settings.explosionVolumeThreshold || 2.0,
+        explosionVolatilityThreshold: settings.explosionVolatilityThreshold || 1.5,
+        autoTradingEnabled: settings.autoTradingEnabled ?? false,
+        autoTradingStartTime: settings.autoTradingStartTime || '09:30',
+        autoTradingEndTime: settings.autoTradingEndTime || '16:00',
+        processTradingViewSignals: settings.processTradingViewSignals ?? true,
+        autoSelectStrike: settings.autoSelectStrike ?? true,
+        autoDetermineDirection: settings.autoDetermineDirection ?? true,
       }
     });
   } catch (error) {
@@ -74,16 +134,24 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { userId, ...settingsData } = body;
 
-    console.log('Saving settings:', settingsData);
+    console.log('Saving settings:', Object.keys(settingsData));
 
     // Get any existing settings
     let settings = await db.botSettings.findFirst();
 
-    const dataToUpdate = {
-      ...settingsData,
-      ibPort: settingsData.ibPort ? parseInt(settingsData.ibPort) : undefined,
-      ibClientId: settingsData.ibClientId ? parseInt(settingsData.ibClientId) : undefined,
-    };
+    const dataToUpdate: Record<string, unknown> = { ...settingsData };
+    
+    // Convert numeric fields
+    if (settingsData.ibPort) dataToUpdate.ibPort = parseInt(settingsData.ibPort);
+    if (settingsData.ibClientId) dataToUpdate.ibClientId = parseInt(settingsData.ibClientId);
+    if (settingsData.fixedContracts) dataToUpdate.fixedContracts = parseInt(settingsData.fixedContracts);
+    if (settingsData.minContracts) dataToUpdate.minContracts = parseInt(settingsData.minContracts);
+    if (settingsData.maxContracts) dataToUpdate.maxContracts = parseInt(settingsData.maxContracts);
+    if (settingsData.contractsPercentage) dataToUpdate.contractsPercentage = parseFloat(settingsData.contractsPercentage);
+    if (settingsData.contractsRiskAmount) dataToUpdate.contractsRiskAmount = parseFloat(settingsData.contractsRiskAmount);
+    if (settingsData.minConfidenceConservative) dataToUpdate.minConfidenceConservative = parseFloat(settingsData.minConfidenceConservative);
+    if (settingsData.minConfidenceBalanced) dataToUpdate.minConfidenceBalanced = parseFloat(settingsData.minConfidenceBalanced);
+    if (settingsData.minConfidenceAggressive) dataToUpdate.minConfidenceAggressive = parseFloat(settingsData.minConfidenceAggressive);
 
     if (!settings) {
       // Create new settings
@@ -112,6 +180,9 @@ export async function POST(request: NextRequest) {
         telegramEnabled: settings.telegramEnabled,
         telegramBotToken: settings.telegramBotToken || '',
         telegramChatId: settings.telegramChatId || '',
+        tradingMode: settings.tradingMode,
+        activeSymbols: settings.activeSymbols,
+        primarySymbol: settings.primarySymbol,
       }
     });
   } catch (error) {
@@ -132,7 +203,7 @@ function getDefaultSettings() {
     ibPort: 7497,
     ibClientId: 1,
     ibConnected: false,
-    strikeSelectionMode: 'OFFSET',
+    strikeSelectionMode: 'CONTRACT_PRICE',
     contractPriceMin: 300,
     contractPriceMax: 400,
     spxStrikeOffset: 5,
@@ -144,5 +215,35 @@ function getDefaultSettings() {
     maxOpenPositions: 3,
     maxDailyLoss: 1000,
     defaultQuantity: 1,
+    // New advanced settings
+    tradingMode: 'BALANCED',
+    activeSymbols: 'SPX',
+    primarySymbol: 'SPX',
+    contractSizeMode: 'FIXED',
+    fixedContracts: 1,
+    contractsPercentage: 2.0,
+    contractsRiskAmount: 100.0,
+    minContracts: 1,
+    maxContracts: 10,
+    minConfidenceConservative: 80.0,
+    minConfidenceBalanced: 70.0,
+    minConfidenceAggressive: 60.0,
+    useRSI: true,
+    useMACD: true,
+    useBollinger: true,
+    useEMA: true,
+    useADX: true,
+    detectExplosions: true,
+    detectReversals: true,
+    detectInstitutional: true,
+    detectSupplyDemand: true,
+    explosionVolumeThreshold: 2.0,
+    explosionVolatilityThreshold: 1.5,
+    autoTradingEnabled: false,
+    autoTradingStartTime: '09:30',
+    autoTradingEndTime: '16:00',
+    processTradingViewSignals: true,
+    autoSelectStrike: true,
+    autoDetermineDirection: true,
   };
 }

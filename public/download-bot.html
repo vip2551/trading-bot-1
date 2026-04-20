@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>تحميل بوت التداول</title>
+    <title>تحميل البوت</title>
     <style>
         * {
             margin: 0;
@@ -12,149 +12,142 @@
         }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             min-height: 100vh;
             display: flex;
-            justify-content: center;
             align-items: center;
+            justify-content: center;
             padding: 20px;
         }
         .container {
-            background: rgba(255, 255, 255, 0.95);
+            background: white;
             border-radius: 20px;
             padding: 40px;
             max-width: 600px;
             width: 100%;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
             text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
         h1 {
             color: #1a1a2e;
             margin-bottom: 10px;
-            font-size: 2em;
+            font-size: 28px;
         }
-        .subtitle {
+        .version {
             color: #666;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+        }
+        .info {
+            background: #f0f4f8;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: right;
+        }
+        .info p {
+            color: #333;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        .info strong {
+            color: #1a1a2e;
         }
         .download-btn {
             display: inline-block;
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 20px 50px;
-            border-radius: 15px;
+            padding: 18px 50px;
+            border-radius: 50px;
             text-decoration: none;
-            font-size: 1.3em;
+            font-size: 20px;
             font-weight: bold;
-            margin: 20px 0;
-            transition: all 0.3s ease;
-            box-shadow: 0 10px 30px rgba(16, 185, 129, 0.3);
+            margin-top: 20px;
+            transition: transform 0.3s, box-shadow 0.3s;
         }
         .download-btn:hover {
             transform: translateY(-3px);
-            box-shadow: 0 15px 40px rgba(16, 185, 129, 0.4);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
         }
-        .file-info {
-            background: #f3f4f6;
-            border-radius: 10px;
-            padding: 15px;
-            margin: 20px 0;
-        }
-        .file-info p {
-            color: #374151;
-            margin: 5px 0;
-        }
-        .size {
-            color: #10b981;
-            font-weight: bold;
-        }
-        .instructions {
+        .features {
             text-align: right;
-            background: #f0fdf4;
-            border: 2px solid #10b981;
-            border-radius: 10px;
+            margin: 20px 0;
             padding: 20px;
-            margin-top: 30px;
+            background: #f8f9fa;
+            border-radius: 10px;
         }
-        .instructions h3 {
-            color: #059669;
+        .features h3 {
+            color: #1a1a2e;
             margin-bottom: 15px;
+            font-size: 18px;
         }
-        .instructions ol {
-            color: #374151;
-            line-height: 1.8;
+        .features ul {
+            list-style: none;
+            padding: 0;
         }
-        .instructions li {
-            margin-bottom: 10px;
+        .features li {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            color: #333;
+            font-size: 14px;
         }
-        .copy-btn {
-            background: #3b82f6;
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 0.9em;
-            margin-right: 10px;
+        .features li:last-child {
+            border-bottom: none;
         }
-        .copy-btn:hover {
-            background: #2563eb;
+        .features li::before {
+            content: "✅ ";
         }
-        code {
-            background: #1f2937;
-            color: #10b981;
-            padding: 3px 8px;
+        .new {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 2px 8px;
             border-radius: 4px;
-            font-family: monospace;
+            font-size: 12px;
+            margin-right: 5px;
+        }
+        .note {
+            color: #666;
+            font-size: 14px;
+            margin-top: 20px;
+            line-height: 1.6;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🤖 بوت التداول برو</h1>
-        <p class="subtitle">Trading Bot Pro - الإصدار الأخير</p>
-
-        <div class="file-info">
-            <p>📦 اسم الملف: <code>trading-bot-railway-v3.tar.gz</code></p>
-            <p>📊 الحجم: <span class="size">~376 KB</span></p>
-            <p>📅 آخر تحديث: <span id="date"></span></p>
+        <div class="icon">📦</div>
+        <h1>Trading Bot Pro</h1>
+        <p class="version">الإصدار الأخير - April 2026</p>
+        
+        <div class="info">
+            <p><strong>اسم الملف:</strong> trading-bot-pro.zip</p>
+            <p><strong>الحجم:</strong> 31 MB</p>
+            <p><strong>التحديثات:</strong> إعدادات متقدمة جديدة</p>
         </div>
-
-        <a href="/trading-bot-railway-v3.tar.gz" download class="download-btn">
+        
+        <div class="features">
+            <h3>🆕 الميزات الجديدة:</h3>
+            <ul>
+                <li><span class="new">جديد</span> أنماط التداول الثلاثة (محافظ / متوازن / عدواني)</li>
+                <li><span class="new">جديد</span> المؤشرات الفنية (RSI, MACD, Bollinger, EMA, ADX)</li>
+                <li><span class="new">جديد</span> كشف الإشارات (انفجارات، انعكاسات، نشاط مؤسسي)</li>
+                <li><span class="new">جديد</span> إعدادات العقود (ثابت / نسبة / مخاطرة / ثقة)</li>
+                <li><span class="new">جديد</span> دعم رموز متعددة (SPX, SPY, QQQ, ...)</li>
+            </ul>
+        </div>
+        
+        <a href="/bot-download.zip" download class="download-btn">
             ⬇️ تحميل الآن
         </a>
-
-        <div class="instructions">
-            <h3>📋 خطوات النشر على Railway:</h3>
-            <ol>
-                <li>حمّل الملف بالضغط على زر "تحميل الآن"</li>
-                <li>فك الضغط على جهازك:
-                    <br><code>tar -xzf trading-bot-railway-v3.tar.gz</code>
-                    <button class="copy-btn" onclick="copyCode('tar -xzf trading-bot-railway-v3.tar.gz')">نسخ</button>
-                </li>
-                <li>ارفع إلى GitHub:
-                    <br><code>git init && git add . && git commit -m "Bot"</code>
-                    <button class="copy-btn" onclick="copyCode('git init && git add . && git commit -m \"Bot\"')">نسخ</button>
-                </li>
-                <li>انشر على Railway من GitHub</li>
-            </ol>
-        </div>
-
-        <div class="instructions" style="background: #fef3c7; border-color: #f59e0b; margin-top: 15px;">
-            <h3 style="color: #d97706;">⚡ للتجربة السريعة:</h3>
-            <p style="color: #374151;">افتح البوت على Railway واختر <strong>"وضع تجريبي"</strong> من تبويب الاتصال</p>
-            <p style="color: #374151; margin-top: 10px;">الوضع التجريبي يعمل بدون الحاجة لـ Interactive Brokers!</p>
-        </div>
+        
+        <p class="note">
+            بعد التحميل، فك الضغط ثم شغّل:<br>
+            <code>bun install</code> ثم <code>bun run dev</code>
+        </p>
     </div>
-
-    <script>
-        document.getElementById('date').textContent = new Date().toLocaleDateString('ar-SA');
-
-        function copyCode(text) {
-            navigator.clipboard.writeText(text).then(() => {
-                alert('تم النسخ!');
-            });
-        }
-    </script>
 </body>
 </html>

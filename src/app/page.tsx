@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Bot,
   Play,
@@ -64,6 +64,8 @@ import {
   Eye,
   Server,
   Terminal,
+  Download,
+  QrCode,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -649,6 +651,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [saving, setSaving] = useState(false);
   const [togglingBot, setTogglingBot] = useState(false);
+  const settingsLoadedRef = useRef(false); // Use ref to track if settings loaded once
   const [ibStatus, setIbStatus] = useState<IBStatus | null>(null);
 
   // Stats
@@ -668,6 +671,37 @@ export default function Dashboard() {
 
   // VPS Settings
   const [vpsIP, setVpsIP] = useState("");
+
+  // Platform Integration Settings
+  const [platformConnections, setPlatformConnections] = useState<{binance: boolean; coinbase: boolean; exness: boolean}>({
+    binance: false,
+    coinbase: false,
+    exness: false,
+  });
+  const [platformLoading, setPlatformLoading] = useState<string | null>(null);
+  
+  // Binance
+  const [binanceApiKey, setBinanceApiKey] = useState("");
+  const [binanceApiSecret, setBinanceApiSecret] = useState("");
+  const [binanceTestnet, setBinanceTestnet] = useState(true);
+  
+  // Coinbase
+  const [coinbaseApiKey, setCoinbaseApiKey] = useState("");
+  const [coinbaseApiSecret, setCoinbaseApiSecret] = useState("");
+  const [coinbasePassphrase, setCoinbasePassphrase] = useState("");
+  const [coinbaseSandbox, setCoinbaseSandbox] = useState(true);
+  
+  // Exness
+  const [exnessApiKey, setExnessApiKey] = useState("");
+  const [exnessApiSecret, setExnessApiSecret] = useState("");
+  const [exnessAccountId, setExnessAccountId] = useState("");
+  const [exnessDemo, setExnessDemo] = useState(true);
+  
+  // Quick Trade
+  const [quickTradePlatform, setQuickTradePlatform] = useState("binance");
+  const [quickTradeSymbol, setQuickTradeSymbol] = useState("BTCUSDT");
+  const [quickTradeSide, setQuickTradeSide] = useState<"BUY" | "SELL">("BUY");
+  const [quickTradeQuantity, setQuickTradeQuantity] = useState("0.001");
 
   // Telegram Settings
   const [telegramEnabled, setTelegramEnabled] = useState(false);
@@ -766,6 +800,51 @@ export default function Dashboard() {
     recentLogs: Array<{ time: string; type: string; message: string }>;
   } | null>(null);
 
+  // === NEW: Advanced Trading Settings ===
+  
+  // Trading Mode
+  const [tradingMode, setTradingMode] = useState<"CONSERVATIVE" | "BALANCED" | "AGGRESSIVE">("BALANCED");
+  
+  // Multiple Symbols
+  const [activeSymbols, setActiveSymbols] = useState<string[]>(["SPX"]);
+  const [primarySymbol, setPrimarySymbol] = useState("SPX");
+  const [newSymbol, setNewSymbol] = useState("");
+  
+  // Contract Settings
+  const [contractSizeMode, setContractSizeMode] = useState<"FIXED" | "PERCENTAGE" | "RISK_BASED" | "CONFIDENCE">("FIXED");
+  const [fixedContracts, setFixedContracts] = useState("1");
+  const [contractsPercentage, setContractsPercentage] = useState("2");
+  const [contractsRiskAmount, setContractsRiskAmount] = useState("100");
+  const [minContracts, setMinContracts] = useState("1");
+  const [maxContracts, setMaxContracts] = useState("10");
+  
+  // Confidence Thresholds
+  const [minConfidenceConservative, setMinConfidenceConservative] = useState("80");
+  const [minConfidenceBalanced, setMinConfidenceBalanced] = useState("70");
+  const [minConfidenceAggressive, setMinConfidenceAggressive] = useState("60");
+  
+  // Technical Indicators
+  const [useRSI, setUseRSI] = useState(true);
+  const [useMACD, setUseMACD] = useState(true);
+  const [useBollinger, setUseBollinger] = useState(true);
+  const [useEMA, setUseEMA] = useState(true);
+  const [useADX, setUseADX] = useState(true);
+  
+  // Signal Detection
+  const [detectExplosions, setDetectExplosions] = useState(true);
+  const [detectReversals, setDetectReversals] = useState(true);
+  const [detectInstitutional, setDetectInstitutional] = useState(true);
+  const [detectSupplyDemand, setDetectSupplyDemand] = useState(true);
+  const [explosionVolumeThreshold, setExplosionVolumeThreshold] = useState("2.0");
+  const [explosionVolatilityThreshold, setExplosionVolatilityThreshold] = useState("1.5");
+  
+  // Auto Trading Hours
+  const [autoTradingStartTime, setAutoTradingStartTime] = useState("09:30");
+  const [autoTradingEndTime, setAutoTradingEndTime] = useState("16:00");
+  const [processTradingViewSignals, setProcessTradingViewSignals] = useState(true);
+  const [autoSelectStrike, setAutoSelectStrike] = useState(true);
+  const [autoDetermineDirection, setAutoDetermineDirection] = useState(true);
+
   // Fetch all data with timeout
   const fetchWithTimeout = async (url: string, timeoutMs: number = 5000) => {
     const controller = new AbortController();
@@ -799,25 +878,58 @@ export default function Dashboard() {
         pnl: closed.reduce((sum: number, t: Trade) => sum + (t.pnl || 0), 0),
       });
 
-      // Fetch settings with timeout
-      const settingsRes = await fetchWithTimeout('/api/settings?userId=demo', 5000);
-      const settingsData = await settingsRes.json();
-      
-      if (settingsData?.settings) {
-        const s = settingsData.settings;
-        setSettings(s);
-        setIsBotRunning(s.isRunning || false);
-        setStrikeSelectionMode(s.strikeSelectionMode || "OFFSET");
-        setContractPriceMin(String(s.contractPriceMin || 300));
-        setContractPriceMax(String(s.contractPriceMax || 400));
-        setSpxStrikeOffset(String(s.spxStrikeOffset || 5));
-        setSpxDeltaTarget(String(s.spxDeltaTarget || 0.3));
-        setIbHost(s.ibHost || "127.0.0.1");
-        setIbPort(String(s.ibPort || 7497));
-        setIbClientId(String(s.ibClientId || 1));
-        setTelegramEnabled(s.telegramEnabled || false);
-        setTelegramBotToken(s.telegramBotToken || "");
-        setTelegramChatId(s.telegramChatId || "");
+      // Fetch settings with timeout - only load once on initial load
+      if (!settingsLoadedRef.current) {
+        const settingsRes = await fetchWithTimeout('/api/settings?userId=demo', 5000);
+        const settingsData = await settingsRes.json();
+        
+        if (settingsData?.settings) {
+          const s = settingsData.settings;
+          setSettings(s);
+          setIsBotRunning(s.isRunning || false);
+          setStrikeSelectionMode(s.strikeSelectionMode || "OFFSET");
+          setContractPriceMin(String(s.contractPriceMin || 300));
+          setContractPriceMax(String(s.contractPriceMax || 400));
+          setSpxStrikeOffset(String(s.spxStrikeOffset || 5));
+          setSpxDeltaTarget(String(s.spxDeltaTarget || 0.3));
+          setIbHost(s.ibHost || "127.0.0.1");
+          setIbPort(String(s.ibPort || 7497));
+          setIbClientId(String(s.ibClientId || 1));
+          setTelegramEnabled(s.telegramEnabled || false);
+          setTelegramBotToken(s.telegramBotToken || "");
+          setTelegramChatId(s.telegramChatId || "");
+          
+          // Load new advanced settings
+          setTradingMode(s.tradingMode || "BALANCED");
+          setActiveSymbols(s.activeSymbols ? s.activeSymbols.split(",") : ["SPX"]);
+          setPrimarySymbol(s.primarySymbol || "SPX");
+          setContractSizeMode(s.contractSizeMode || "FIXED");
+          setFixedContracts(String(s.fixedContracts || 1));
+          setContractsPercentage(String(s.contractsPercentage || 2));
+          setContractsRiskAmount(String(s.contractsRiskAmount || 100));
+          setMinContracts(String(s.minContracts || 1));
+          setMaxContracts(String(s.maxContracts || 10));
+          setMinConfidenceConservative(String(s.minConfidenceConservative || 80));
+          setMinConfidenceBalanced(String(s.minConfidenceBalanced || 70));
+          setMinConfidenceAggressive(String(s.minConfidenceAggressive || 60));
+          setUseRSI(s.useRSI ?? true);
+          setUseMACD(s.useMACD ?? true);
+          setUseBollinger(s.useBollinger ?? true);
+          setUseEMA(s.useEMA ?? true);
+          setUseADX(s.useADX ?? true);
+          setDetectExplosions(s.detectExplosions ?? true);
+          setDetectReversals(s.detectReversals ?? true);
+          setDetectInstitutional(s.detectInstitutional ?? true);
+          setDetectSupplyDemand(s.detectSupplyDemand ?? true);
+          setExplosionVolumeThreshold(String(s.explosionVolumeThreshold || 2.0));
+          setExplosionVolatilityThreshold(String(s.explosionVolatilityThreshold || 1.5));
+          setAutoTradingStartTime(s.autoTradingStartTime || "09:30");
+          setAutoTradingEndTime(s.autoTradingEndTime || "16:00");
+          setProcessTradingViewSignals(s.processTradingViewSignals ?? true);
+          setAutoSelectStrike(s.autoSelectStrike ?? true);
+          setAutoDetermineDirection(s.autoDetermineDirection ?? true);
+          settingsLoadedRef.current = true;
+        }
       }
 
       try {
@@ -1226,6 +1338,125 @@ export default function Dashboard() {
     }
   };
   
+  // Platform Integration Functions
+  const connectPlatform = async (platform: 'binance' | 'coinbase' | 'exness') => {
+    setPlatformLoading(platform);
+    try {
+      let config: any = {};
+      
+      if (platform === 'binance') {
+        if (!binanceApiKey || !binanceApiSecret) {
+          toast.error(lang === "ar" ? "يرجى إدخال API Key و API Secret" : "Please enter API Key and API Secret");
+          setPlatformLoading(null);
+          return;
+        }
+        config = {
+          apiKey: binanceApiKey,
+          apiSecret: binanceApiSecret,
+          testnet: binanceTestnet,
+        };
+      } else if (platform === 'coinbase') {
+        if (!coinbaseApiKey || !coinbaseApiSecret || !coinbasePassphrase) {
+          toast.error(lang === "ar" ? "يرجى إدخال جميع البيانات" : "Please enter all credentials");
+          setPlatformLoading(null);
+          return;
+        }
+        config = {
+          apiKey: coinbaseApiKey,
+          apiSecret: coinbaseApiSecret,
+          passphrase: coinbasePassphrase,
+          sandbox: coinbaseSandbox,
+        };
+      } else if (platform === 'exness') {
+        if (!exnessApiKey || !exnessApiSecret) {
+          toast.error(lang === "ar" ? "يرجى إدخال API Key و API Secret" : "Please enter API Key and API Secret");
+          setPlatformLoading(null);
+          return;
+        }
+        config = {
+          apiKey: exnessApiKey,
+          apiSecret: exnessApiSecret,
+          accountId: exnessAccountId,
+          demo: exnessDemo,
+        };
+      }
+      
+      const res = await fetch("/api/platforms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform,
+          action: "configure",
+          config,
+        }),
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        setPlatformConnections(prev => ({ ...prev, [platform]: true }));
+        toast.success(lang === "ar" ? `تم ربط ${platform} بنجاح!` : `${platform} connected successfully!`);
+      } else {
+        toast.error(data.message || (lang === "ar" ? "فشل الاتصال" : "Connection failed"));
+      }
+    } catch (error: any) {
+      toast.error(error.message || (lang === "ar" ? "فشل الاتصال" : "Connection failed"));
+    } finally {
+      setPlatformLoading(null);
+    }
+  };
+  
+  const disconnectPlatform = async (platform: 'binance' | 'coinbase' | 'exness') => {
+    try {
+      await fetch("/api/platforms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform,
+          action: "disconnect",
+        }),
+      });
+      
+      setPlatformConnections(prev => ({ ...prev, [platform]: false }));
+      toast.success(lang === "ar" ? `تم قطع اتصال ${platform}` : `${platform} disconnected`);
+    } catch {
+      toast.error(lang === "ar" ? "فشل قطع الاتصال" : "Failed to disconnect");
+    }
+  };
+  
+  const executeQuickTrade = async () => {
+    const platformKey = quickTradePlatform as keyof typeof platformConnections;
+    if (!platformConnections[platformKey] && quickTradePlatform !== 'ib') {
+      toast.error(lang === "ar" ? "المنصة غير متصلة" : "Platform not connected");
+      return;
+    }
+    
+    try {
+      const res = await fetch("/api/platforms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform: quickTradePlatform,
+          action: "market_order",
+          symbol: quickTradeSymbol,
+          side: quickTradeSide,
+          quantity: parseFloat(quickTradeQuantity),
+          volume: parseFloat(quickTradeQuantity),
+        }),
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        toast.success(lang === "ar" ? "تم تنفيذ الصفقة!" : "Trade executed!");
+      } else {
+        toast.error(data.message || (lang === "ar" ? "فشل التنفيذ" : "Execution failed"));
+      }
+    } catch {
+      toast.error(lang === "ar" ? "فشل الاتصال" : "Connection failed");
+    }
+  };
+  
   // Fetch backups
   const fetchBackups = async () => {
     try {
@@ -1529,6 +1760,11 @@ export default function Dashboard() {
               <TabsTrigger value="backup" className="flex items-center gap-1 px-3 py-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><Database className="h-4 w-4 text-emerald-500" /><span className="hidden sm:inline text-xs">{t.backup}</span></TabsTrigger>
               <TabsTrigger value="help" className="flex items-center gap-1 px-3 py-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><HelpCircle className="h-4 w-4 text-sky-500" /><span className="hidden sm:inline text-xs">{t.help}</span></TabsTrigger>
               <TabsTrigger value="plans" className="flex items-center gap-1 px-3 py-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><Crown className="h-4 w-4 text-yellow-500" /><span className="hidden sm:inline text-xs">{t.plans}</span></TabsTrigger>
+              <TabsTrigger value="advanced" className="flex items-center gap-1 px-3 py-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><Settings className="h-4 w-4 text-violet-500" /><span className="hidden sm:inline text-xs">{lang === "ar" ? "متقدم" : "Advanced"}</span></TabsTrigger>
+              <TabsTrigger value="platforms" className="flex items-center gap-1 px-3 py-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><Globe className="h-4 w-4 text-yellow-500" /><span className="hidden sm:inline text-xs">{lang === "ar" ? "منصات" : "Platforms"}</span></TabsTrigger>
+              <TabsTrigger value="push" className="flex items-center gap-1 px-3 py-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><Smartphone className="h-4 w-4 text-pink-500" /><span className="hidden sm:inline text-xs">{lang === "ar" ? "Push" : "Push"}</span></TabsTrigger>
+              <TabsTrigger value="technical" className="flex items-center gap-1 px-3 py-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><LineChart className="h-4 w-4 text-teal-500" /><span className="hidden sm:inline text-xs">{lang === "ar" ? "تحليل" : "Analysis"}</span></TabsTrigger>
+              <TabsTrigger value="mobile" className="flex items-center gap-1 px-3 py-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><Smartphone className="h-4 w-4 text-indigo-500" /><span className="hidden sm:inline text-xs">{lang === "ar" ? "موبايل" : "Mobile"}</span></TabsTrigger>
             </TabsList>
           </div>
 
@@ -3385,16 +3621,360 @@ export default function Dashboard() {
 
           {/* Notifications */}
           <TabsContent value="notifications" className="space-y-6">
+            {/* Status Card */}
+            <Card className={`border-2 ${telegramEnabled && telegramBotToken && telegramChatId ? 'border-green-500/50 bg-green-500/5' : 'border-amber-500/50 bg-amber-500/5'}`}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`h-12 w-12 rounded-full flex items-center justify-center ${telegramEnabled && telegramBotToken && telegramChatId ? 'bg-green-500' : 'bg-amber-500/20'}`}>
+                      <MessageSquare className={`h-6 w-6 ${telegramEnabled && telegramBotToken && telegramChatId ? 'text-white' : 'text-amber-500'}`} />
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold">
+                        {telegramEnabled && telegramBotToken && telegramChatId
+                          ? (lang === "ar" ? "🟢 Telegram متصل" : "🟢 Telegram Connected")
+                          : (lang === "ar" ? "Telegram غير مُعد" : "Telegram Not Configured")}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {telegramEnabled && telegramBotToken && telegramChatId
+                          ? (lang === "ar" ? "ستصل الإشعارات إلى Telegram" : "Notifications will be sent to Telegram")
+                          : (lang === "ar" ? "أدخل التوكن ومعرف المحادثة للتفعيل" : "Enter token and chat ID to enable")}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={telegramEnabled}
+                    onCheckedChange={(checked) => {
+                      setTelegramEnabled(checked);
+                      saveSettings({ telegramEnabled: checked, telegramBotToken, telegramChatId });
+                    }}
+                    disabled={!telegramBotToken || !telegramChatId}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Telegram Configuration */}
             <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2"><MessageSquare className="h-5 w-5" />{t.telegramNotifications}</CardTitle><CardDescription>{t.receiveNotifications}</CardDescription></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5 text-blue-500" />
+                  {lang === "ar" ? "إعدادات Telegram" : "Telegram Configuration"}
+                </CardTitle>
+                <CardDescription>
+                  {lang === "ar" ? "أدخل بيانات البوت الخاص بك" : "Enter your bot credentials"}
+                </CardDescription>
+              </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between"><div><Label>{t.enableTelegram}</Label><p className="text-sm text-muted-foreground">{t.receiveOnTelegram}</p></div><Switch checked={telegramEnabled} onCheckedChange={(checked) => { setTelegramEnabled(checked); saveSettings({ telegramEnabled: checked, telegramBotToken, telegramChatId }); }} /></div>
-                <Separator />
-                <div className="space-y-2"><Label>{t.botToken}</Label><Input type="text" placeholder="123456:ABC-DEF..." value={telegramBotToken} onChange={(e) => { setTelegramBotToken(e.target.value); setIsEditingTelegram(true); }} /></div>
-                <div className="space-y-2"><Label>{t.chatId}</Label><Input placeholder="-1001234567890" value={telegramChatId} onChange={(e) => { setTelegramChatId(e.target.value); setIsEditingTelegram(true); }} /></div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <KeyRound className="h-4 w-4" />
+                    {t.botToken}
+                  </Label>
+                  <Input
+                    type="password"
+                    placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+                    value={telegramBotToken}
+                    onChange={(e) => {
+                      setTelegramBotToken(e.target.value);
+                      setIsEditingTelegram(true);
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {lang === "ar"
+                      ? "احصل عليه من @BotFather في Telegram"
+                      : "Get it from @BotFather in Telegram"}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    {t.chatId}
+                  </Label>
+                  <Input
+                    placeholder="-1001234567890"
+                    value={telegramChatId}
+                    onChange={(e) => {
+                      setTelegramChatId(e.target.value);
+                      setIsEditingTelegram(true);
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {lang === "ar"
+                      ? "معرف المحادثة أو القناة (أرسل رسالة للبوت ثم احصل على ID من @userinfobot)"
+                      : "Chat or Channel ID (message your bot, then get ID from @userinfobot)"}
+                  </p>
+                </div>
                 <div className="flex gap-2">
-                  <Button onClick={() => { setIsEditingTelegram(false); saveSettings({ telegramEnabled, telegramBotToken, telegramChatId }); }} disabled={saving} className="flex-1">{saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}{t.saveSettings}</Button>
-                  <Button variant="outline" onClick={testTelegram} disabled={!telegramBotToken || !telegramChatId}>{t.test}</Button>
+                  <Button
+                    onClick={() => {
+                      setIsEditingTelegram(false);
+                      saveSettings({ telegramEnabled, telegramBotToken, telegramChatId });
+                    }}
+                    disabled={saving}
+                    className="flex-1"
+                  >
+                    {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                    {t.saveSettings}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={testTelegram}
+                    disabled={!telegramBotToken || !telegramChatId}
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    {t.test}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Notification Types */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Bell className="h-5 w-5 text-orange-500" />
+                  {lang === "ar" ? "أنواع الإشعارات" : "Notification Types"}
+                </CardTitle>
+                <CardDescription>
+                  {lang === "ar" ? "اختر الإشعارات التي تريد استلامها" : "Choose which notifications to receive"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Trade Opened */}
+                <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                  <div className="flex items-center gap-3">
+                    <TrendingUp className="h-5 w-5 text-green-500" />
+                    <div>
+                      <Label className="font-medium">
+                        {lang === "ar" ? "صفقة جديدة مفتوحة" : "Trade Opened"}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {lang === "ar" ? "إشعار عند فتح صفقة جديدة" : "Notify when a new trade opens"}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+
+                {/* Trade Closed */}
+                <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="h-5 w-5 text-blue-500" />
+                    <div>
+                      <Label className="font-medium">
+                        {lang === "ar" ? "صفقة مغلقة" : "Trade Closed"}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {lang === "ar" ? "إشعار عند إغلاق صفقة مع الربح/الخسارة" : "Notify when trade closes with P&L"}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+
+                {/* Daily Report */}
+                <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-5 w-5 text-purple-500" />
+                    <div>
+                      <Label className="font-medium">
+                        {lang === "ar" ? "التقرير اليومي" : "Daily Report"}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {lang === "ar" ? "ملخص يومي للأداء والصفقات" : "Daily performance summary"}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+
+                {/* Error Alerts */}
+                <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="h-5 w-5 text-red-500" />
+                    <div>
+                      <Label className="font-medium">
+                        {lang === "ar" ? "تنبيهات الأخطاء" : "Error Alerts"}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {lang === "ar" ? "إشعار عند حدوث خطأ في النظام" : "Notify on system errors"}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+
+                {/* Whale Activity */}
+                <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                  <div className="flex items-center gap-3">
+                    <Fish className="h-5 w-5 text-teal-500" />
+                    <div>
+                      <Label className="font-medium">
+                        {lang === "ar" ? "نشاط الحيتان" : "Whale Activity"}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {lang === "ar" ? "إشعار عند رصد حركات كبيرة" : "Notify on large market moves"}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+
+                {/* Price Alerts */}
+                <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                  <div className="flex items-center gap-3">
+                    <DollarSign className="h-5 w-5 text-yellow-500" />
+                    <div>
+                      <Label className="font-medium">
+                        {lang === "ar" ? "تنبيهات السعر" : "Price Alerts"}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {lang === "ar" ? "تحديثات الأسعار المهمة" : "Important price updates"}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Notification Language */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Languages className="h-5 w-5 text-primary" />
+                  {lang === "ar" ? "لغة الإشعارات" : "Notification Language"}
+                </CardTitle>
+                <CardDescription>
+                  {lang === "ar" ? "اختر لغة إشعارات Telegram" : "Choose Telegram notification language"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Select
+                  value={lang}
+                  onValueChange={(value) => {
+                    setLang(value as "en" | "ar");
+                    toast.success(value === "ar" ? "تم تغيير اللغة إلى العربية" : "Language changed to English");
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ar">
+                      <div className="flex items-center gap-2">
+                        <span>🇸🇦</span>
+                        <span>العربية (Arabic)</span>
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="en">
+                      <div className="flex items-center gap-2">
+                        <span>🇺🇸</span>
+                        <span>English</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground mt-2">
+                  {lang === "ar"
+                    ? "جميع إشعارات Telegram ستُرسل بالعربية"
+                    : "All Telegram notifications will be sent in English"}
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Setup Guide */}
+            <Card className="border-2 border-blue-500/20 bg-blue-500/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-blue-600">
+                  <HelpCircle className="h-5 w-5" />
+                  {lang === "ar" ? "دليل الإعداد" : "Setup Guide"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="h-6 w-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-bold">1</div>
+                    <div>
+                      <p className="font-medium">{lang === "ar" ? "إنشاء بوت Telegram" : "Create Telegram Bot"}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {lang === "ar"
+                          ? "افتح Telegram وابحث عن @BotFather، أرسل /newbot واتبع التعليمات"
+                          : "Open Telegram, search @BotFather, send /newbot and follow instructions"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="h-6 w-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-bold">2</div>
+                    <div>
+                      <p className="font-medium">{lang === "ar" ? "احصل على Chat ID" : "Get Chat ID"}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {lang === "ar"
+                          ? "أرسل رسالة لبوتك، ثم ابحث عن @userinfobot للحصول على ID"
+                          : "Message your bot, then search @userinfobot to get your ID"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="h-6 w-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-bold">3</div>
+                    <div>
+                      <p className="font-medium">{lang === "ar" ? "أدخل البيانات" : "Enter Credentials"}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {lang === "ar"
+                          ? "الصق التوكن وChat ID في الحقول أعلاه واضغط حفظ"
+                          : "Paste token and Chat ID in fields above, click Save"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="h-6 w-6 rounded-full bg-green-500 text-white flex items-center justify-center text-sm font-bold">✓</div>
+                    <div>
+                      <p className="font-medium">{lang === "ar" ? "اختبر الاتصال" : "Test Connection"}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {lang === "ar"
+                          ? "اضغط زر الاختبار للتأكد من وصول الإشعارات"
+                          : "Click Test button to verify notifications work"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Example Notification */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Smartphone className="h-5 w-5 text-gray-500" />
+                  {lang === "ar" ? "مثال على الإشعار" : "Notification Example"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 font-mono text-sm whitespace-pre-wrap">
+{lang === "ar" ? `🔔 *صفقة جديدة مفتوحة*
+
+📈 *SPX* 📈 كول
+━━━━━━━━━━━━━━━
+📌 *الاسترايك:* 5025
+💰 *سعر الاسترايك:* $3.25
+📊 *السعر الحالي:* $5002.50
+📝 *عدد العقود:* 2
+💵 *سعر الدخول:* $650.00
+⏰ *الوقت:* 2024/01/15 10:30:00
+
+🤖 _بوت التداول الاحترافي_` : `🔔 *New Trade Opened*
+
+📈 *SPX* 📈 CALL
+━━━━━━━━━━━━━━━
+📌 *Strike:* 5025
+💰 *Strike Price:* $3.25
+📊 *Stock Price:* $5002.50
+📝 *Contracts:* 2
+💵 *Entry Price:* $650.00
+⏰ *Time:* 2024/01/15 10:30:00 AM
+
+🤖 _Trading Bot Pro_`}
                 </div>
               </CardContent>
             </Card>
@@ -3681,6 +4261,1573 @@ export default function Dashboard() {
           {/* Plans Management */}
           <TabsContent value="plans" className="space-y-6">
             <PlansManager />
+          </TabsContent>
+
+          {/* Advanced Trading Settings */}
+          <TabsContent value="advanced" className="space-y-6">
+            <div className="grid gap-6">
+              {/* Trading Mode Section */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Gauge className="h-5 w-5 text-violet-500" />
+                    {lang === "ar" ? "أنماط التداول" : "Trading Modes"}
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "اختر نمط التداول المناسب لاستراتيجيتك" : "Choose a trading mode that fits your strategy"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Conservative */}
+                    <Card className={`cursor-pointer border-2 transition-all ${tradingMode === "CONSERVATIVE" ? "border-green-500 bg-green-500/10" : "border-muted"}`} onClick={() => setTradingMode("CONSERVATIVE")}>
+                      <CardContent className="p-4 text-center">
+                        <Shield className="h-8 w-8 mx-auto text-green-500 mb-2" />
+                        <h3 className="font-bold">{lang === "ar" ? "محافظ" : "Conservative"}</h3>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {lang === "ar" ? "ثقة 80%+" : "80%+ Confidence"}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {lang === "ar" ? "صفقات أقل، دقة أعلى" : "Fewer trades, higher accuracy"}
+                        </p>
+                      </CardContent>
+                    </Card>
+                    {/* Balanced */}
+                    <Card className={`cursor-pointer border-2 transition-all ${tradingMode === "BALANCED" ? "border-blue-500 bg-blue-500/10" : "border-muted"}`} onClick={() => setTradingMode("BALANCED")}>
+                      <CardContent className="p-4 text-center">
+                        <Activity className="h-8 w-8 mx-auto text-blue-500 mb-2" />
+                        <h3 className="font-bold">{lang === "ar" ? "متوازن" : "Balanced"}</h3>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {lang === "ar" ? "ثقة 70%+" : "70%+ Confidence"}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {lang === "ar" ? "توازن بين الكمية والدقة" : "Balance between quantity and accuracy"}
+                        </p>
+                      </CardContent>
+                    </Card>
+                    {/* Aggressive */}
+                    <Card className={`cursor-pointer border-2 transition-all ${tradingMode === "AGGRESSIVE" ? "border-red-500 bg-red-500/10" : "border-muted"}`} onClick={() => setTradingMode("AGGRESSIVE")}>
+                      <CardContent className="p-4 text-center">
+                        <Zap className="h-8 w-8 mx-auto text-red-500 mb-2" />
+                        <h3 className="font-bold">{lang === "ar" ? "عدواني" : "Aggressive"}</h3>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {lang === "ar" ? "ثقة 60%+" : "60%+ Confidence"}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {lang === "ar" ? "صفقات أكثر، مخاطرة أعلى" : "More trades, higher risk"}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </div>
+                  
+                  {/* Confidence Thresholds */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2">
+                        <Shield className="h-4 w-4 text-green-500" />
+                        {lang === "ar" ? "حد الثقة (محافظ)" : "Conservative Threshold"} (%)
+                      </Label>
+                      <Input type="number" value={minConfidenceConservative} onChange={(e) => setMinConfidenceConservative(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2">
+                        <Activity className="h-4 w-4 text-blue-500" />
+                        {lang === "ar" ? "حد الثقة (متوازن)" : "Balanced Threshold"} (%)
+                      </Label>
+                      <Input type="number" value={minConfidenceBalanced} onChange={(e) => setMinConfidenceBalanced(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-red-500" />
+                        {lang === "ar" ? "حد الثقة (عدواني)" : "Aggressive Threshold"} (%)
+                      </Label>
+                      <Input type="number" value={minConfidenceAggressive} onChange={(e) => setMinConfidenceAggressive(e.target.value)} />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Technical Indicators Section */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5 text-cyan-500" />
+                    {lang === "ar" ? "المؤشرات الفنية" : "Technical Indicators"}
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "فعّل أو ألغِ تفعيل المؤشرات الفنية المستخدمة في التحليل" : "Enable or disable technical indicators used in analysis"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">RSI</span>
+                      </div>
+                      <Switch checked={useRSI} onCheckedChange={setUseRSI} />
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">MACD</span>
+                      </div>
+                      <Switch checked={useMACD} onCheckedChange={setUseMACD} />
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">Bollinger</span>
+                      </div>
+                      <Switch checked={useBollinger} onCheckedChange={setUseBollinger} />
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">EMA</span>
+                      </div>
+                      <Switch checked={useEMA} onCheckedChange={setUseEMA} />
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">ADX</span>
+                      </div>
+                      <Switch checked={useADX} onCheckedChange={setUseADX} />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Signal Detection Section */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Bell className="h-5 w-5 text-amber-500" />
+                    {lang === "ar" ? "كشف الإشارات" : "Signal Detection"}
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "أنواع الإشارات التي يكتشفها البوت تلقائياً" : "Types of signals the bot detects automatically"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <span className="font-medium">{lang === "ar" ? "انفجارات الأسعار" : "Price Explosions"}</span>
+                        <p className="text-xs text-muted-foreground">{lang === "ar" ? "ضغط بولينجر + حجم غير عادي" : "Bollinger squeeze + unusual volume"}</p>
+                      </div>
+                      <Switch checked={detectExplosions} onCheckedChange={setDetectExplosions} />
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <span className="font-medium">{lang === "ar" ? "الانعكاسات" : "Reversals"}</span>
+                        <p className="text-xs text-muted-foreground">{lang === "ar" ? "تباعد RSI" : "RSI divergence"}</p>
+                      </div>
+                      <Switch checked={detectReversals} onCheckedChange={setDetectReversals} />
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <span className="font-medium">{lang === "ar" ? "النشاط المؤسسي" : "Institutional Activity"}</span>
+                        <p className="text-xs text-muted-foreground">{lang === "ar" ? "أحجام تداول ضخمة" : "Large trading volumes"}</p>
+                      </div>
+                      <Switch checked={detectInstitutional} onCheckedChange={setDetectInstitutional} />
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <span className="font-medium">{lang === "ar" ? "مناطق العرض والطلب" : "Supply & Demand"}</span>
+                        <p className="text-xs text-muted-foreground">{lang === "ar" ? "تحديد تلقائي" : "Auto detection"}</p>
+                      </div>
+                      <Switch checked={detectSupplyDemand} onCheckedChange={setDetectSupplyDemand} />
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "حد حجم الانفجار (x)" : "Explosion Volume Threshold (x)"}</Label>
+                      <Input type="number" step="0.1" value={explosionVolumeThreshold} onChange={(e) => setExplosionVolumeThreshold(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "حد تقلب الانفجار (x)" : "Explosion Volatility Threshold (x)"}</Label>
+                      <Input type="number" step="0.1" value={explosionVolatilityThreshold} onChange={(e) => setExplosionVolatilityThreshold(e.target.value)} />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Contract Settings Section */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <DollarSign className="h-5 w-5 text-green-500" />
+                    {lang === "ar" ? "إعدادات العقود" : "Contract Settings"}
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "كيفية تحديد عدد العقود لكل صفقة" : "How to determine contract quantity per trade"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {["FIXED", "PERCENTAGE", "RISK_BASED", "CONFIDENCE"].map((mode) => (
+                      <Button
+                        key={mode}
+                        variant={contractSizeMode === mode ? "default" : "outline"}
+                        className={`h-auto py-3 flex-col ${contractSizeMode === mode ? "bg-violet-500 hover:bg-violet-600" : ""}`}
+                        onClick={() => setContractSizeMode(mode as "FIXED" | "PERCENTAGE" | "RISK_BASED" | "CONFIDENCE")}
+                      >
+                        <span className="font-bold">
+                          {mode === "FIXED" ? (lang === "ar" ? "ثابت" : "Fixed") :
+                           mode === "PERCENTAGE" ? (lang === "ar" ? "نسبة %" : "Percent") :
+                           mode === "RISK_BASED" ? (lang === "ar" ? "مخاطرة" : "Risk") :
+                           (lang === "ar" ? "ثقة" : "Confidence")}
+                        </span>
+                        <span className="text-xs opacity-70">
+                          {mode === "FIXED" ? (lang === "ar" ? "عدد محدد" : "Fixed number") :
+                           mode === "PERCENTAGE" ? (lang === "ar" ? "% من المحفظة" : "% of portfolio") :
+                           mode === "RISK_BASED" ? (lang === "ar" ? "مبلغ مخاطرة" : "Risk amount") :
+                           (lang === "ar" ? "حسب الثقة" : "Based on confidence")}
+                        </span>
+                      </Button>
+                    ))}
+                  </div>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "عدد العقود الثابت" : "Fixed Contracts"}</Label>
+                      <Input type="number" value={fixedContracts} onChange={(e) => setFixedContracts(e.target.value)} disabled={contractSizeMode !== "FIXED"} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "النسبة المئوية (%)" : "Percentage (%)"}</Label>
+                      <Input type="number" value={contractsPercentage} onChange={(e) => setContractsPercentage(e.target.value)} disabled={contractSizeMode !== "PERCENTAGE"} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "مبلغ المخاطرة ($)" : "Risk Amount ($)"}</Label>
+                      <Input type="number" value={contractsRiskAmount} onChange={(e) => setContractsRiskAmount(e.target.value)} disabled={contractSizeMode !== "RISK_BASED"} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "أقل عدد عقود" : "Min Contracts"}</Label>
+                      <Input type="number" value={minContracts} onChange={(e) => setMinContracts(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "أكثر عدد عقود" : "Max Contracts"}</Label>
+                      <Input type="number" value={maxContracts} onChange={(e) => setMaxContracts(e.target.value)} />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Multiple Symbols Section */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Globe className="h-5 w-5 text-blue-500" />
+                    {lang === "ar" ? "الرموز المتعددة" : "Multiple Symbols"}
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "أضف أو أزل الرموز التي يتداول عليها البوت" : "Add or remove symbols the bot trades on"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    {activeSymbols.map((symbol) => (
+                      <Badge 
+                        key={symbol} 
+                        variant={symbol === primarySymbol ? "default" : "secondary"}
+                        className={`text-sm py-1 px-3 cursor-pointer ${symbol === primarySymbol ? "bg-violet-500" : ""}`}
+                        onClick={() => setPrimarySymbol(symbol)}
+                      >
+                        {symbol}
+                        {symbol === primarySymbol && <Star className="h-3 w-3 ml-1 inline" />}
+                        {activeSymbols.length > 1 && (
+                          <XCircle 
+                            className="h-3 w-3 ml-1 inline hover:text-red-500" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveSymbols(activeSymbols.filter(s => s !== symbol));
+                              if (symbol === primarySymbol && activeSymbols.length > 1) {
+                                setPrimarySymbol(activeSymbols.filter(s => s !== symbol)[0]);
+                              }
+                            }} 
+                          />
+                        )}
+                      </Badge>
+                    ))}
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <Input 
+                      placeholder={lang === "ar" ? "أضف رمز جديد (مثل: SPY, QQQ)" : "Add new symbol (e.g., SPY, QQQ)"} 
+                      value={newSymbol} 
+                      onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && newSymbol && !activeSymbols.includes(newSymbol)) {
+                          setActiveSymbols([...activeSymbols, newSymbol]);
+                          setNewSymbol("");
+                        }
+                      }}
+                    />
+                    <Button 
+                      onClick={() => {
+                        if (newSymbol && !activeSymbols.includes(newSymbol)) {
+                          setActiveSymbols([...activeSymbols, newSymbol]);
+                          setNewSymbol("");
+                        }
+                      }}
+                      disabled={!newSymbol || activeSymbols.includes(newSymbol)}
+                    >
+                      {lang === "ar" ? "إضافة" : "Add"}
+                    </Button>
+                  </div>
+                  
+                  <p className="text-xs text-muted-foreground">
+                    {lang === "ar" 
+                      ? "اضغط على رمز لجعله الأساسي (★). الرمز الأساسي هو الذي سيتم التداول عليه افتراضياً." 
+                      : "Click a symbol to make it primary (★). Primary symbol is the default for trading."}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Auto Trading Hours */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="h-5 w-5 text-orange-500" />
+                    {lang === "ar" ? "ساعات التداول التلقائي" : "Auto Trading Hours"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "وقت البدء" : "Start Time"}</Label>
+                      <Input type="time" value={autoTradingStartTime} onChange={(e) => setAutoTradingStartTime(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "وقت الانتهاء" : "End Time"}</Label>
+                      <Input type="time" value={autoTradingEndTime} onChange={(e) => setAutoTradingEndTime(e.target.value)} />
+                    </div>
+                  </div>
+                  
+                  <Separator />
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <span className="text-sm">{lang === "ar" ? "معالجة إشارات TradingView" : "Process TradingView Signals"}</span>
+                      <Switch checked={processTradingViewSignals} onCheckedChange={setProcessTradingViewSignals} />
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <span className="text-sm">{lang === "ar" ? "اختيار الاسترايك تلقائياً" : "Auto Select Strike"}</span>
+                      <Switch checked={autoSelectStrike} onCheckedChange={setAutoSelectStrike} />
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border">
+                      <span className="text-sm">{lang === "ar" ? "تحديد الاتجاه تلقائياً" : "Auto Determine Direction"}</span>
+                      <Switch checked={autoDetermineDirection} onCheckedChange={setAutoDetermineDirection} />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Save Button */}
+              <div className="flex justify-end gap-4">
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    // Reset to defaults
+                    setTradingMode("BALANCED");
+                    setActiveSymbols(["SPX"]);
+                    setPrimarySymbol("SPX");
+                    setContractSizeMode("FIXED");
+                    setFixedContracts("1");
+                    setUseRSI(true);
+                    setUseMACD(true);
+                    setUseBollinger(true);
+                    setUseEMA(true);
+                    setUseADX(true);
+                    setDetectExplosions(true);
+                    setDetectReversals(true);
+                    setDetectInstitutional(true);
+                    setDetectSupplyDemand(true);
+                  }}
+                >
+                  {lang === "ar" ? "إعادة تعيين" : "Reset"}
+                </Button>
+                <Button 
+                  onClick={async () => {
+                    setSaving(true);
+                    try {
+                      const res = await fetch("/api/settings", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          userId: "demo",
+                          tradingMode,
+                          activeSymbols: activeSymbols.join(","),
+                          primarySymbol,
+                          contractSizeMode,
+                          fixedContracts: parseInt(fixedContracts),
+                          contractsPercentage: parseFloat(contractsPercentage),
+                          contractsRiskAmount: parseFloat(contractsRiskAmount),
+                          minContracts: parseInt(minContracts),
+                          maxContracts: parseInt(maxContracts),
+                          minConfidenceConservative: parseFloat(minConfidenceConservative),
+                          minConfidenceBalanced: parseFloat(minConfidenceBalanced),
+                          minConfidenceAggressive: parseFloat(minConfidenceAggressive),
+                          useRSI,
+                          useMACD,
+                          useBollinger,
+                          useEMA,
+                          useADX,
+                          detectExplosions,
+                          detectReversals,
+                          detectInstitutional,
+                          detectSupplyDemand,
+                          explosionVolumeThreshold: parseFloat(explosionVolumeThreshold),
+                          explosionVolatilityThreshold: parseFloat(explosionVolatilityThreshold),
+                          autoTradingStartTime,
+                          autoTradingEndTime,
+                          processTradingViewSignals,
+                          autoSelectStrike,
+                          autoDetermineDirection,
+                        }),
+                      });
+                      const data = await res.json();
+                      if (data.success) {
+                        toast.success(lang === "ar" ? "تم حفظ الإعدادات المتقدمة!" : "Advanced settings saved!");
+                      } else {
+                        toast.error(lang === "ar" ? "فشل الحفظ" : "Failed to save");
+                      }
+                    } catch {
+                      toast.error(lang === "ar" ? "فشل الاتصال" : "Connection failed");
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  disabled={saving}
+                  className="bg-violet-500 hover:bg-violet-600"
+                >
+                  {saving ? (
+                    <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
+                  {lang === "ar" ? "حفظ الإعدادات" : "Save Settings"}
+                </Button>
+              </div>
+            </div>
+          </TabsContent>
+
+          {/* Platform Integration - Binance, Coinbase, Exness */}
+          <TabsContent value="platforms" className="space-y-6">
+            {/* Header */}
+            <Card className="border-2 border-yellow-500/30 bg-gradient-to-r from-yellow-500/5 to-orange-500/5">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="h-16 w-16 rounded-full bg-yellow-500/20 flex items-center justify-center">
+                    <Globe className="h-8 w-8 text-yellow-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold">
+                      {lang === "ar" ? "التكامل مع المنصات" : "Platform Integration"}
+                    </h2>
+                    <p className="text-muted-foreground">
+                      {lang === "ar" ? "ربط البوت بمنصات التداول لتنفيذ الصفقات تلقائياً" : "Connect bot to trading platforms for automatic execution"}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {/* Binance */}
+              <Card className="border-2 border-yellow-500/20">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="h-12 w-12 rounded-lg bg-yellow-500/20 flex items-center justify-center">
+                        <span className="text-2xl font-bold text-yellow-500">B</span>
+                      </div>
+                      <div>
+                        <CardTitle>Binance</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          {lang === "ar" ? "عملات رقمية (Spot & Futures)" : "Crypto (Spot & Futures)"}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant={platformConnections.binance ? "default" : "secondary"} className={platformConnections.binance ? "bg-green-500" : ""}>
+                      {platformConnections.binance ? (lang === "ar" ? "متصل" : "Connected") : (lang === "ar" ? "غير متصل" : "Offline")}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs">API Key</Label>
+                    <Input 
+                      type="password" 
+                      placeholder="Enter Binance API Key"
+                      value={binanceApiKey}
+                      onChange={(e) => setBinanceApiKey(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">API Secret</Label>
+                    <Input 
+                      type="password" 
+                      placeholder="Enter Binance API Secret"
+                      value={binanceApiSecret}
+                      onChange={(e) => setBinanceApiSecret(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                    <div className="flex items-center gap-2">
+                      <TestTube className="h-4 w-4 text-blue-500" />
+                      <span className="text-sm">{lang === "ar" ? "وضع التجريبي (Testnet)" : "Testnet Mode"}</span>
+                    </div>
+                    <Switch 
+                      checked={binanceTestnet}
+                      onCheckedChange={setBinanceTestnet}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      className="flex-1"
+                      onClick={() => connectPlatform('binance')}
+                      disabled={platformLoading === 'binance'}
+                    >
+                      {platformLoading === 'binance' ? (
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                      )}
+                      {lang === "ar" ? "ربط" : "Connect"}
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => disconnectPlatform('binance')}
+                      disabled={!platformConnections.binance}
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Coinbase */}
+              <Card className="border-2 border-blue-500/20">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="h-12 w-12 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                        <span className="text-2xl font-bold text-blue-500">C</span>
+                      </div>
+                      <div>
+                        <CardTitle>Coinbase Pro</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          {lang === "ar" ? "عملات رقمية متقدمة" : "Advanced Crypto Trading"}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant={platformConnections.coinbase ? "default" : "secondary"} className={platformConnections.coinbase ? "bg-green-500" : ""}>
+                      {platformConnections.coinbase ? (lang === "ar" ? "متصل" : "Connected") : (lang === "ar" ? "غير متصل" : "Offline")}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs">API Key</Label>
+                    <Input 
+                      type="password" 
+                      placeholder="Enter Coinbase API Key"
+                      value={coinbaseApiKey}
+                      onChange={(e) => setCoinbaseApiKey(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">API Secret</Label>
+                    <Input 
+                      type="password" 
+                      placeholder="Enter Coinbase API Secret"
+                      value={coinbaseApiSecret}
+                      onChange={(e) => setCoinbaseApiSecret(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Passphrase</Label>
+                    <Input 
+                      type="password" 
+                      placeholder="Enter Passphrase"
+                      value={coinbasePassphrase}
+                      onChange={(e) => setCoinbasePassphrase(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                    <div className="flex items-center gap-2">
+                      <TestTube className="h-4 w-4 text-blue-500" />
+                      <span className="text-sm">{lang === "ar" ? "وضع Sandbox" : "Sandbox Mode"}</span>
+                    </div>
+                    <Switch 
+                      checked={coinbaseSandbox}
+                      onCheckedChange={setCoinbaseSandbox}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      className="flex-1"
+                      onClick={() => connectPlatform('coinbase')}
+                      disabled={platformLoading === 'coinbase'}
+                    >
+                      {platformLoading === 'coinbase' ? (
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                      )}
+                      {lang === "ar" ? "ربط" : "Connect"}
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => disconnectPlatform('coinbase')}
+                      disabled={!platformConnections.coinbase}
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Exness */}
+              <Card className="border-2 border-emerald-500/20">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="h-12 w-12 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                        <span className="text-2xl font-bold text-emerald-500">E</span>
+                      </div>
+                      <div>
+                        <CardTitle>Exness</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          {lang === "ar" ? "فوركس ومعادن" : "Forex & Metals"}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant={platformConnections.exness ? "default" : "secondary"} className={platformConnections.exness ? "bg-green-500" : ""}>
+                      {platformConnections.exness ? (lang === "ar" ? "متصل" : "Connected") : (lang === "ar" ? "غير متصل" : "Offline")}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs">API Key</Label>
+                    <Input 
+                      type="password" 
+                      placeholder="Enter Exness API Key"
+                      value={exnessApiKey}
+                      onChange={(e) => setExnessApiKey(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">API Secret</Label>
+                    <Input 
+                      type="password" 
+                      placeholder="Enter Exness API Secret"
+                      value={exnessApiSecret}
+                      onChange={(e) => setExnessApiSecret(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">{lang === "ar" ? "رقم الحساب" : "Account ID"}</Label>
+                    <Input 
+                      placeholder="Enter Account ID"
+                      value={exnessAccountId}
+                      onChange={(e) => setExnessAccountId(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                    <div className="flex items-center gap-2">
+                      <TestTube className="h-4 w-4 text-emerald-500" />
+                      <span className="text-sm">{lang === "ar" ? "حساب تجريبي (Demo)" : "Demo Account"}</span>
+                    </div>
+                    <Switch 
+                      checked={exnessDemo}
+                      onCheckedChange={setExnessDemo}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      className="flex-1"
+                      onClick={() => connectPlatform('exness')}
+                      disabled={platformLoading === 'exness'}
+                    >
+                      {platformLoading === 'exness' ? (
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                      )}
+                      {lang === "ar" ? "ربط" : "Connect"}
+                    </Button>
+                    <Button 
+                      variant="outline"
+                      onClick={() => disconnectPlatform('exness')}
+                      disabled={!platformConnections.exness}
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Interactive Brokers */}
+              <Card className="border-2 border-green-500/20">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="h-12 w-12 rounded-lg bg-green-500/20 flex items-center justify-center">
+                        <span className="text-xl font-bold text-green-500">IB</span>
+                      </div>
+                      <div>
+                        <CardTitle>Interactive Brokers</CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          {lang === "ar" ? "أسهم وخيارات" : "Stocks & Options"}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant={ibStatus?.connected ? "default" : "secondary"} className={ibStatus?.connected ? "bg-green-500" : ""}>
+                      {ibStatus?.connected ? (lang === "ar" ? "متصل" : "Connected") : (lang === "ar" ? "غير متصل" : "Offline")}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">{lang === "ar" ? "المضيف" : "Host"}</Label>
+                      <Input value={ibHost} onChange={(e) => setIbHost(e.target.value)} className="h-8" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">{lang === "ar" ? "المنفذ" : "Port"}</Label>
+                      <Input value={ibPort} onChange={(e) => setIbPort(e.target.value)} className="h-8" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Client ID</Label>
+                      <Input value={ibClientId} onChange={(e) => setIbClientId(e.target.value)} className="h-8" />
+                    </div>
+                  </div>
+                  <div className={`p-3 rounded-lg ${ibStatus?.connected ? 'bg-green-500/10 border border-green-500/20' : 'bg-amber-500/10 border border-amber-500/20'}`}>
+                    <div className="flex items-center gap-2">
+                      {ibStatus?.connected ? (
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                      ) : (
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                      )}
+                      <span className="text-sm">
+                        {ibStatus?.connected 
+                          ? (lang === "ar" ? `متصل (${ibStatus.accountType})` : `Connected (${ibStatus.accountType})`)
+                          : (lang === "ar" ? "شغّل TWS أو Gateway" : "Start TWS or Gateway")}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Connection Status Summary */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5 text-primary" />
+                  {lang === "ar" ? "حالة الاتصالات" : "Connection Status"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className={`p-4 rounded-lg ${platformConnections.binance ? 'bg-green-500/10 border border-green-500/20' : 'bg-muted/30'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Binance</span>
+                      {platformConnections.binance && <CheckCircle className="h-4 w-4 text-green-500" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {binanceTestnet ? (lang === "ar" ? "تجريبي" : "Testnet") : (lang === "ar" ? "حقيقي" : "Live")}
+                    </p>
+                  </div>
+                  <div className={`p-4 rounded-lg ${platformConnections.coinbase ? 'bg-green-500/10 border border-green-500/20' : 'bg-muted/30'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Coinbase</span>
+                      {platformConnections.coinbase && <CheckCircle className="h-4 w-4 text-green-500" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {coinbaseSandbox ? (lang === "ar" ? "تجريبي" : "Sandbox") : (lang === "ar" ? "حقيقي" : "Live")}
+                    </p>
+                  </div>
+                  <div className={`p-4 rounded-lg ${platformConnections.exness ? 'bg-green-500/10 border border-green-500/20' : 'bg-muted/30'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Exness</span>
+                      {platformConnections.exness && <CheckCircle className="h-4 w-4 text-green-500" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {exnessDemo ? (lang === "ar" ? "تجريبي" : "Demo") : (lang === "ar" ? "حقيقي" : "Live")}
+                    </p>
+                  </div>
+                  <div className={`p-4 rounded-lg ${ibStatus?.connected ? 'bg-green-500/10 border border-green-500/20' : 'bg-muted/30'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">IB</span>
+                      {ibStatus?.connected && <CheckCircle className="h-4 w-4 text-green-500" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {ibStatus?.connected ? ibStatus.accountType : (lang === "ar" ? "غير متصل" : "Offline")}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Quick Trade Panel */}
+            <Card className="border-2 border-primary/20">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Zap className="h-5 w-5 text-primary" />
+                  {lang === "ar" ? "تداول سريع" : "Quick Trade"}
+                </CardTitle>
+                <CardDescription>
+                  {lang === "ar" ? "تنفيذ صفقة سريعة على أي منصة متصلة" : "Execute quick trade on any connected platform"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs">{lang === "ar" ? "المنصة" : "Platform"}</Label>
+                    <Select value={quickTradePlatform} onValueChange={setQuickTradePlatform}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="binance">Binance</SelectItem>
+                        <SelectItem value="coinbase">Coinbase</SelectItem>
+                        <SelectItem value="exness">Exness</SelectItem>
+                        <SelectItem value="ib">Interactive Brokers</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">{lang === "ar" ? "الرمز" : "Symbol"}</Label>
+                    <Input 
+                      placeholder={quickTradePlatform === 'exness' ? 'EURUSD' : 'BTCUSDT'}
+                      value={quickTradeSymbol}
+                      onChange={(e) => setQuickTradeSymbol(e.target.value.toUpperCase())}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">{lang === "ar" ? "الاتجاه" : "Side"}</Label>
+                    <Select value={quickTradeSide} onValueChange={setQuickTradeSide}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="BUY">{lang === "ar" ? "شراء" : "BUY"}</SelectItem>
+                        <SelectItem value="SELL">{lang === "ar" ? "بيع" : "SELL"}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">{lang === "ar" ? "الكمية" : "Quantity"}</Label>
+                    <Input 
+                      type="number"
+                      placeholder="0.01"
+                      value={quickTradeQuantity}
+                      onChange={(e) => setQuickTradeQuantity(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">&nbsp;</Label>
+                    <Button 
+                      className="w-full"
+                      onClick={executeQuickTrade}
+                      disabled={!platformConnections[quickTradePlatform as keyof typeof platformConnections]}
+                    >
+                      <Send className="h-4 w-4 mr-2" />
+                      {lang === "ar" ? "تنفيذ" : "Execute"}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Push Notifications */}
+          <TabsContent value="push" className="space-y-6">
+            {/* Header */}
+            <Card className="border-2 border-pink-500/30 bg-gradient-to-r from-pink-500/5 to-purple-500/5">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="h-16 w-16 rounded-full bg-pink-500/20 flex items-center justify-center">
+                    <Smartphone className="h-8 w-8 text-pink-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold">
+                      {lang === "ar" ? "إشعارات Push للهاتف" : "Push Notifications"}
+                    </h2>
+                    <p className="text-muted-foreground">
+                      {lang === "ar" ? "استلم تنبيهات فورية على هاتفك" : "Get instant alerts on your phone"}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Firebase Cloud Messaging */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Bell className="h-5 w-5 text-orange-500" />
+                    Firebase Cloud Messaging
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "إشعارات عبر Google Firebase" : "Notifications via Google Firebase"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-lg border">
+                    <span className="font-medium">FCM {lang === "ar" ? "مفعّل" : "Enabled"}</span>
+                    <Switch />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Server Key</Label>
+                    <Input type="password" placeholder="Enter FCM Server Key" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Device Token</Label>
+                    <Input placeholder="Enter device FCM token" />
+                  </div>
+                  <Button variant="outline" className="w-full">
+                    <Send className="h-4 w-4 mr-2" />
+                    {lang === "ar" ? "إرسال رسالة اختبار" : "Send Test Push"}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Web Push */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Globe className="h-5 w-5 text-blue-500" />
+                    Web Push API
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "إشعارات المتصفح المباشرة" : "Direct browser notifications"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-lg border">
+                    <span className="font-medium">Web Push {lang === "ar" ? "مفعّل" : "Enabled"}</span>
+                    <Switch />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>VAPID Public Key</Label>
+                    <Input placeholder="Enter VAPID public key" />
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={() => {
+                      if ('Notification' in window) {
+                        Notification.requestPermission().then((permission) => {
+                          if (permission === 'granted') {
+                            new Notification('Trading Bot Pro', {
+                              body: lang === "ar" ? 'إشعارات Push مفعّلة!' : 'Push notifications enabled!',
+                              icon: '/favicon.ico'
+                            });
+                            toast.success(lang === "ar" ? "تم تفعيل الإشعارات!" : "Notifications enabled!");
+                          }
+                        });
+                      }
+                    }}
+                  >
+                    <Bell className="h-4 w-4 mr-2" />
+                    {lang === "ar" ? "طلب الإذن" : "Request Permission"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Notification Settings */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Settings className="h-5 w-5 text-primary" />
+                  {lang === "ar" ? "إعدادات الإشعارات" : "Notification Settings"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-center justify-between p-4 rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <TrendingUp className="h-5 w-5 text-green-500" />
+                      <div>
+                        <p className="font-medium">{lang === "ar" ? "إشارة تداول قوية" : "Strong Trading Signal"}</p>
+                        <p className="text-xs text-muted-foreground">{lang === "ar" ? "ثقة 80%+" : "80%+ confidence"}</p>
+                      </div>
+                    </div>
+                    <Switch defaultChecked />
+                  </div>
+                  <div className="flex items-center justify-between p-4 rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <AlertTriangle className="h-5 w-5 text-red-500" />
+                      <div>
+                        <p className="font-medium">{lang === "ar" ? "تحذير مخاطرة" : "Risk Warning"}</p>
+                        <p className="text-xs text-muted-foreground">{lang === "ar" ? "تغير كبير في السوق" : "Major market change"}</p>
+                      </div>
+                    </div>
+                    <Switch defaultChecked />
+                  </div>
+                  <div className="flex items-center justify-between p-4 rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <CheckCircle className="h-5 w-5 text-blue-500" />
+                      <div>
+                        <p className="font-medium">{lang === "ar" ? "صفقة منفذة" : "Trade Executed"}</p>
+                        <p className="text-xs text-muted-foreground">{lang === "ar" ? "تأكيد التنفيذ" : "Execution confirmation"}</p>
+                      </div>
+                    </div>
+                    <Switch defaultChecked />
+                  </div>
+                  <div className="flex items-center justify-between p-4 rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <FileText className="h-5 w-5 text-purple-500" />
+                      <div>
+                        <p className="font-medium">{lang === "ar" ? "تقرير يومي" : "Daily Report"}</p>
+                        <p className="text-xs text-muted-foreground">{lang === "ar" ? "ملخص الأداء" : "Performance summary"}</p>
+                      </div>
+                    </div>
+                    <Switch />
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>{lang === "ar" ? "ساعات الهدوء (من)" : "Quiet Hours (From)"}</Label>
+                    <Input type="time" defaultValue="22:00" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{lang === "ar" ? "ساعات الهدوء (إلى)" : "Quiet Hours (To)"}</Label>
+                    <Input type="time" defaultValue="08:00" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Quick Setup */}
+            <Card className="border-2 border-green-500/20 bg-green-500/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-green-600">
+                  <CheckCircle className="h-5 w-5" />
+                  {lang === "ar" ? "الإعداد السريع" : "Quick Setup"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-background">
+                    <div className="h-8 w-8 rounded-full bg-green-500 text-white flex items-center justify-center">1</div>
+                    <p>{lang === "ar" ? "فعّل إشعارات Push بالضغط على الزر أعلاه" : "Enable Push notifications by clicking the button above"}</p>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-background">
+                    <div className="h-8 w-8 rounded-full bg-green-500 text-white flex items-center justify-center">2</div>
+                    <p>{lang === "ar" ? "اسمح للمتصفح بإرسال الإشعارات" : "Allow browser to send notifications"}</p>
+                  </div>
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-background">
+                    <div className="h-8 w-8 rounded-full bg-green-500 text-white flex items-center justify-center">✓</div>
+                    <p>{lang === "ar" ? "ستصلك الإشعارات فورياً على جهازك" : "You'll receive instant notifications on your device"}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Advanced Technical Analysis */}
+          <TabsContent value="technical" className="space-y-6">
+            {/* Header */}
+            <Card className="border-2 border-teal-500/30 bg-gradient-to-r from-teal-500/5 to-cyan-500/5">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="h-16 w-16 rounded-full bg-teal-500/20 flex items-center justify-center">
+                    <LineChart className="h-8 w-8 text-teal-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold">
+                      {lang === "ar" ? "التحليل الفني المتقدم" : "Advanced Technical Analysis"}
+                    </h2>
+                    <p className="text-muted-foreground">
+                      {lang === "ar" ? "أدوات احترافية لتحليل السوق" : "Professional tools for market analysis"}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Fibonacci Retracement */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingDown className="h-5 w-5 text-yellow-500" />
+                    Fibonacci Retracement
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "تحديد مستويات الدعم والمقاومة" : "Identify support and resistance levels"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-lg border">
+                    <span className="font-medium">{lang === "ar" ? "تفعيل Fibonacci" : "Enable Fibonacci"}</span>
+                    <Switch defaultChecked />
+                  </div>
+                  
+                  <div className="p-4 rounded-lg bg-muted/30">
+                    <p className="text-sm font-medium mb-2">{lang === "ar" ? "المستويات الرئيسية:" : "Key Levels:"}</p>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between"><span>23.6%</span><Badge variant="outline">{lang === "ar" ? "تصحيح خفيف" : "Light retracement"}</Badge></div>
+                      <div className="flex justify-between"><span>38.2%</span><Badge variant="outline" className="bg-blue-500/10">{lang === "ar" ? "تصحيح متوسط ⭐" : "Moderate retracement ⭐"}</Badge></div>
+                      <div className="flex justify-between"><span>50.0%</span><Badge variant="outline">{lang === "ar" ? "تصحيح نصف" : "Half retracement"}</Badge></div>
+                      <div className="flex justify-between"><span>61.8%</span><Badge variant="outline" className="bg-green-500/10">{lang === "ar" ? "التصحيح الذهبي ⭐⭐" : "Golden ratio ⭐⭐"}</Badge></div>
+                      <div className="flex justify-between"><span>78.6%</span><Badge variant="outline">{lang === "ar" ? "تصحيح عميق" : "Deep retracement"}</Badge></div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "أعلى سعر" : "High Price"}</Label>
+                      <Input type="number" placeholder="5100" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{lang === "ar" ? "أدنى سعر" : "Low Price"}</Label>
+                      <Input type="number" placeholder="4800" />
+                    </div>
+                  </div>
+
+                  <Button className="w-full">
+                    {lang === "ar" ? "حساب مستويات Fibonacci" : "Calculate Fibonacci Levels"}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Elliott Wave Theory */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-purple-500" />
+                    Elliott Wave Theory
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "تحليل أنماط الموجات" : "Wave pattern analysis"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-lg border">
+                    <span className="font-medium">{lang === "ar" ? "تفعيل Elliott Wave" : "Enable Elliott Wave"}</span>
+                    <Switch defaultChecked />
+                  </div>
+
+                  <div className="p-4 rounded-lg bg-muted/30">
+                    <p className="text-sm font-medium mb-2">{lang === "ar" ? "الأنماط الأساسية:" : "Basic Patterns:"}</p>
+                    <div className="space-y-3">
+                      <div className="p-2 rounded bg-green-500/10">
+                        <p className="text-sm font-medium">{lang === "ar" ? "الدافع (5 موجات)" : "Impulse (5 waves)"}</p>
+                        <p className="text-xs text-muted-foreground">1-2-3-4-5 {lang === "ar" ? "(اتجاه رئيسي)" : "(main trend)"}</p>
+                      </div>
+                      <div className="p-2 rounded bg-red-500/10">
+                        <p className="text-sm font-medium">{lang === "ar" ? "التصحيحي (3 موجات)" : "Corrective (3 waves)"}</p>
+                        <p className="text-xs text-muted-foreground">A-B-C {lang === "ar" ? "(عكس الاتجاه)" : "(counter trend)"}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>{lang === "ar" ? "الموجة الحالية المكتشفة" : "Detected Current Wave"}</Label>
+                    <Select defaultValue="3">
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">Wave 1</SelectItem>
+                        <SelectItem value="2">Wave 2</SelectItem>
+                        <SelectItem value="3">Wave 3 ({lang === "ar" ? "الأقوى" : "Strongest"})</SelectItem>
+                        <SelectItem value="4">Wave 4</SelectItem>
+                        <SelectItem value="5">Wave 5</SelectItem>
+                        <SelectItem value="A">Wave A</SelectItem>
+                        <SelectItem value="B">Wave B</SelectItem>
+                        <SelectItem value="C">Wave C</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <Button className="w-full">
+                    {lang === "ar" ? "تحليل Elliott Wave" : "Analyze Elliott Wave"}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Harmonic Patterns */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Compass className="h-5 w-5 text-cyan-500" />
+                    {lang === "ar" ? "الأنماط التوافقية" : "Harmonic Patterns"}
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "كشف الأنماط السعرية المتقدمة" : "Detect advanced price patterns"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-2">
+                    {['Gartley', 'Butterfly', 'Bat', 'Crab', 'Shark', 'Cypher'].map((pattern) => (
+                      <div key={pattern} className="flex items-center justify-between p-2 rounded-lg border">
+                        <span className="text-sm">{pattern}</span>
+                        <Switch defaultChecked />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                    <p className="text-sm text-cyan-600">
+                      {lang === "ar"
+                        ? "💡 الأنماط التوافقية تحدد نقاط الانعكاس بدقة عالية"
+                        : "💡 Harmonic patterns identify reversal points with high precision"}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Pivot Points */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Target className="h-5 w-5 text-orange-500" />
+                    Pivot Points
+                  </CardTitle>
+                  <CardDescription>
+                    {lang === "ar" ? "نقاط المحور اليومية" : "Daily pivot points"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>{lang === "ar" ? "طريقة الحساب" : "Calculation Method"}</Label>
+                    <Select defaultValue="standard">
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="standard">Standard</SelectItem>
+                        <SelectItem value="fibonacci">Fibonacci</SelectItem>
+                        <SelectItem value="camarilla">Camarilla</SelectItem>
+                        <SelectItem value="woodie">Woodie</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="p-4 rounded-lg bg-muted/30 text-sm">
+                    <div className="space-y-2">
+                      <div className="flex justify-between"><span className="text-red-500">R3</span><span>5150.00</span></div>
+                      <div className="flex justify-between"><span className="text-red-400">R2</span><span>5100.00</span></div>
+                      <div className="flex justify-between"><span className="text-orange-500">R1</span><span>5050.00</span></div>
+                      <div className="flex justify-between font-bold"><span className="text-primary">Pivot</span><span>5000.00</span></div>
+                      <div className="flex justify-between"><span className="text-green-500">S1</span><span>4950.00</span></div>
+                      <div className="flex justify-between"><span className="text-green-400">S2</span><span>4900.00</span></div>
+                      <div className="flex justify-between"><span className="text-green-500">S3</span><span>4850.00</span></div>
+                    </div>
+                  </div>
+
+                  <Button className="w-full">
+                    {lang === "ar" ? "حساب Pivot Points" : "Calculate Pivot Points"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Combined Analysis */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Brain className="h-5 w-5 text-violet-500" />
+                  {lang === "ar" ? "التحليل المُجمّع" : "Combined Analysis"}
+                </CardTitle>
+                <CardDescription>
+                  {lang === "ar" ? "نتيجة جميع المؤشرات معاً" : "Result of all indicators combined"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/20 text-center">
+                    <p className="text-3xl font-bold text-green-500">85%</p>
+                    <p className="text-sm text-muted-foreground">{lang === "ar" ? "إشارة صعودية" : "Bullish Signal"}</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-muted/30 text-center">
+                    <p className="text-3xl font-bold">SPX</p>
+                    <p className="text-sm text-muted-foreground">{lang === "ar" ? "الرمز الحالي" : "Current Symbol"}</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20 text-center">
+                    <p className="text-3xl font-bold text-blue-500">Wave 3</p>
+                    <p className="text-sm text-muted-foreground">{lang === "ar" ? "الموجة الحالية" : "Current Wave"}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Mobile App */}
+          <TabsContent value="mobile" className="space-y-6">
+            {/* Header */}
+            <Card className="border-2 border-indigo-500/30 bg-gradient-to-r from-indigo-500/5 to-purple-500/5">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-4">
+                  <div className="h-16 w-16 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                    <Smartphone className="h-8 w-8 text-indigo-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold">
+                      {lang === "ar" ? "تطبيق الموبايل" : "Mobile App"}
+                    </h2>
+                    <p className="text-muted-foreground">
+                      {lang === "ar" ? "تداول من أي مكان مع تطبيقنا" : "Trade from anywhere with our app"}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* App Features */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-yellow-500" />
+                    {lang === "ar" ? "مميزات التطبيق" : "App Features"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-sm">{lang === "ar" ? "لوحة تحكم مصغرة" : "Mini Dashboard"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-sm">{lang === "ar" ? "إشعارات فورية" : "Instant Alerts"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-sm">{lang === "ar" ? "رسم بياني تفاعلي" : "Interactive Charts"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-sm">{lang === "ar" ? "تنفيذ الصفقات" : "Execute Trades"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-sm">{lang === "ar" ? "سجل العمليات" : "Trade History"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-sm">{lang === "ar" ? "إعدادات البوت" : "Bot Settings"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-sm">{lang === "ar" ? "وضع الظلام" : "Dark Mode"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-sm">{lang === "ar" ? "دعم العربية" : "Arabic Support"}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Download Options */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Download className="h-5 w-5 text-primary" />
+                    {lang === "ar" ? "تحميل التطبيق" : "Download App"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* iOS */}
+                  <div className="p-4 rounded-lg border-2 border-gray-200 dark:border-gray-700 hover:border-gray-400 transition-colors cursor-pointer">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-gray-900 flex items-center justify-center">
+                        <span className="text-white text-2xl"></span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold">iOS App</p>
+                        <p className="text-sm text-muted-foreground">App Store</p>
+                      </div>
+                      <Button variant="outline" size="sm">
+                        {lang === "ar" ? "قريباً" : "Coming Soon"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Android */}
+                  <div className="p-4 rounded-lg border-2 border-green-200 dark:border-green-800 hover:border-green-400 transition-colors cursor-pointer">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-green-500 flex items-center justify-center">
+                        <span className="text-white text-2xl"></span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold">Android App</p>
+                        <p className="text-sm text-muted-foreground">Google Play</p>
+                      </div>
+                      <Button variant="outline" size="sm">
+                        {lang === "ar" ? "قريباً" : "Coming Soon"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* PWA */}
+                  <div className="p-4 rounded-lg border-2 border-blue-200 dark:border-blue-800 hover:border-blue-400 transition-colors cursor-pointer">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-blue-500 flex items-center justify-center">
+                        <Globe className="h-6 w-6 text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold">PWA</p>
+                        <p className="text-sm text-muted-foreground">{lang === "ar" ? "تطبيق ويب تقدمي" : "Progressive Web App"}</p>
+                      </div>
+                      <Button 
+                        size="sm"
+                        onClick={() => {
+                          toast.success(lang === "ar" ? "يمكنك إضافة الموقع للشاشة الرئيسية!" : "You can add this site to home screen!");
+                        }}
+                      >
+                        {lang === "ar" ? "متوفر" : "Available"}
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* PWA Instructions */}
+            <Card className="border-2 border-blue-500/20 bg-blue-500/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-blue-600">
+                  <Globe className="h-5 w-5" />
+                  {lang === "ar" ? "كيفية تثبيت PWA" : "How to Install PWA"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <p className="font-medium">{lang === "ar" ? "على iPhone/iPad:" : "On iPhone/iPad:"}</p>
+                    <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
+                      <li>{lang === "ar" ? "افتح الموقع في Safari" : "Open this site in Safari"}</li>
+                      <li>{lang === "ar" ? "اضغط زر المشاركة" : "Tap the Share button"}</li>
+                      <li>{lang === "ar" ? "اختر \"إضافة إلى الشاشة الرئيسية\"" : "Select \"Add to Home Screen\""}</li>
+                      <li>{lang === "ar" ? "اضغط \"إضافة\"" : "Tap \"Add\""}</li>
+                    </ol>
+                  </div>
+                  <div className="space-y-3">
+                    <p className="font-medium">{lang === "ar" ? "على Android:" : "On Android:"}</p>
+                    <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
+                      <li>{lang === "ar" ? "افتح الموقع في Chrome" : "Open this site in Chrome"}</li>
+                      <li>{lang === "ar" ? "اضغط على القائمة ( ثلاث نقاط)" : "Tap the menu (⋮ three dots)"}</li>
+                      <li>{lang === "ar" ? "اختر \"إضافة إلى الشاشة الرئيسية\"" : "Select \"Add to Home Screen\""}</li>
+                      <li>{lang === "ar" ? "اضغط \"تثبيت\"" : "Tap \"Install\""}</li>
+                    </ol>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* App Preview */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Eye className="h-5 w-5 text-primary" />
+                  {lang === "ar" ? "معاينة التطبيق" : "App Preview"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid md:grid-cols-3 gap-4">
+                  {/* Dashboard Preview */}
+                  <div className="aspect-[9/16] bg-gradient-to-b from-background to-muted rounded-2xl border-2 overflow-hidden">
+                    <div className="p-4 border-b bg-muted/50">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold">Trading Bot</span>
+                        <Badge className="bg-green-500 text-xs">Live</Badge>
+                      </div>
+                    </div>
+                    <div className="p-3 space-y-2">
+                      <div className="h-16 rounded-lg bg-muted animate-pulse" />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="h-12 rounded-lg bg-muted animate-pulse" />
+                        <div className="h-12 rounded-lg bg-muted animate-pulse" />
+                      </div>
+                      <div className="h-20 rounded-lg bg-muted animate-pulse" />
+                      <div className="h-20 rounded-lg bg-muted animate-pulse" />
+                    </div>
+                  </div>
+
+                  {/* Chart Preview */}
+                  <div className="aspect-[9/16] bg-gradient-to-b from-background to-muted rounded-2xl border-2 overflow-hidden">
+                    <div className="p-4 border-b bg-muted/50">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold">SPX</span>
+                        <span className="text-green-500 text-sm">+1.2%</span>
+                      </div>
+                    </div>
+                    <div className="p-3 space-y-2">
+                      <div className="h-32 rounded-lg bg-gradient-to-t from-green-500/20 to-transparent" />
+                      <div className="flex justify-between text-xs text-muted-foreground px-2">
+                        <span>9:30</span>
+                        <span>12:00</span>
+                        <span>16:00</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mt-4">
+                        <div className="p-2 rounded bg-muted text-center text-xs">
+                          <p className="text-muted-foreground">High</p>
+                          <p className="font-bold">5,025</p>
+                        </div>
+                        <div className="p-2 rounded bg-muted text-center text-xs">
+                          <p className="text-muted-foreground">Low</p>
+                          <p className="font-bold">4,985</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Trades Preview */}
+                  <div className="aspect-[9/16] bg-gradient-to-b from-background to-muted rounded-2xl border-2 overflow-hidden">
+                    <div className="p-4 border-b bg-muted/50">
+                      <span className="font-bold">{lang === "ar" ? "الصفقات" : "Trades"}</span>
+                    </div>
+                    <div className="p-3 space-y-2">
+                      {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="p-2 rounded-lg bg-muted flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <TrendingUp className="h-4 w-4 text-green-500" />
+                            <span className="text-sm font-medium">SPX</span>
+                          </div>
+                          <span className="text-xs text-green-500">+$250</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* QR Code */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Smartphone className="h-5 w-5 text-primary" />
+                  {lang === "ar" ? "امسح للتحميل" : "Scan to Download"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col items-center">
+                <div className="h-40 w-40 bg-white rounded-lg flex items-center justify-center border-2">
+                  <div className="text-center">
+                    <QrCode className="h-24 w-24 text-gray-400 mx-auto" />
+                    <p className="text-xs text-muted-foreground mt-2">QR Code</p>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground mt-4">
+                  {lang === "ar" 
+                    ? "امسح الرمز بكاميرا هاتفك للوصول للتطبيق"
+                    : "Scan with your phone camera to access the app"}
+                </p>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </main>

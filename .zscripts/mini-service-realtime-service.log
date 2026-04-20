@@ -1,12 +1,9 @@
 [realtime-service] Installing dependencies...
 bun install v1.3.12 (700fc117)
 
-+ socket.io@4.8.3
-
-22 packages installed [191.00ms]
+Checked 22 installs across 23 packages (no changes) [50.00ms]
 [realtime-service] Running bun run dev...
-$ bun --hot index.ts
-46 |     }
+$ bun --hot46 |     }
 47 |   }
 48 |   let er;
 49 |   if (args.length > 0)
@@ -15,3 +12,4 @@ $ bun --hot index.ts
                  ^
 error: Failed to start server. Is port 3004 in use?
       at emitError (node:events:51:13)
+error: screrror: script "dev" was terminated by signal SIGTERM (Polite quit request)
