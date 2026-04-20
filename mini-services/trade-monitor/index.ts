@@ -56,11 +56,13 @@ async function sendTelegram(message: string, settings: any): Promise<boolean> {
   }
 }
 
-// Get current price (simulated or from IB)
-async function getCurrentPrice(trade: any): Promise<{ optionPrice: number; stockPrice: number }> {
+// Get current price (only from real sources)
+async function getCurrentPrice(trade: any): Promise<{ optionPrice: number; stockPrice: number; isReal: boolean } | null> {
   // Try to get real price from IB service
   try {
-    const res = await fetch('http://localhost:3003/market/spx');
+    const res = await fetch('http://localhost:3003/market/spx', {
+      signal: AbortSignal.timeout(5000)
+    });
     if (res.ok) {
       const data = await res.json();
       if (data.price) {
@@ -70,7 +72,8 @@ async function getCurrentPrice(trade: any): Promise<{ optionPrice: number; stock
         const baseOptionPrice = trade.entryPrice || 350;
         return {
           stockPrice: data.price,
-          optionPrice: Math.max(1, baseOptionPrice + (spotChange * optionDelta * 0.1))
+          optionPrice: Math.max(1, baseOptionPrice + (spotChange * optionDelta * 0.1)),
+          isReal: true
         };
       }
     }
@@ -80,30 +83,31 @@ async function getCurrentPrice(trade: any): Promise<{ optionPrice: number; stock
 
   // Try price API
   try {
-    const res = await fetch(`http://localhost:3000/api/price?symbol=${trade.symbol}`);
+    const res = await fetch(`http://localhost:3000/api/price?symbol=${trade.symbol}`, {
+      signal: AbortSignal.timeout(5000)
+    });
     if (res.ok) {
       const data = await res.json();
-      const stockPrice = data.price || data.spotPrice || 5850;
-      // Estimate option price
-      const baseOptionPrice = trade.entryPrice || 350;
-      const randomChange = (Math.random() - 0.5) * 20;
-      return {
-        stockPrice,
-        optionPrice: Math.max(1, baseOptionPrice + randomChange)
-      };
+      const stockPrice = data.price || data.spotPrice;
+      if (stockPrice) {
+        // Estimate option price
+        const baseOptionPrice = trade.entryPrice || 350;
+        const change = data.change || 0;
+        return {
+          stockPrice,
+          optionPrice: Math.max(1, baseOptionPrice * (1 + change / 100)),
+          isReal: true
+        };
+      }
     }
   } catch {
     // Price API not available
   }
 
-  // Simulate price movement for demo
-  const basePrice = trade.entryPrice || 350;
-  const randomChange = (Math.random() - 0.5) * 20;
-  const volatility = Math.sin(Date.now() / 10000) * 15;
-  return {
-    stockPrice: 5850 + (Math.random() - 0.5) * 20,
-    optionPrice: Math.max(1, basePrice + randomChange + volatility)
-  };
+  // ⚠️ CRITICAL: Do NOT simulate prices for real trades
+  // Return null to indicate no real data available
+  console.error(`🚫 لا توجد بيانات حقيقية لـ ${trade.symbol} - لا يمكن مراقبة الصفقة`);
+  return null;
 }
 
 // Calculate P&L
@@ -216,7 +220,15 @@ async function monitorTrades(): Promise<void> {
   
   for (const trade of trades) {
     try {
-      const { optionPrice, stockPrice } = await getCurrentPrice(trade);
+      const priceData = await getCurrentPrice(trade);
+      
+      // ⚠️ CRITICAL: Skip monitoring if no real price data
+      if (!priceData || !priceData.isReal) {
+        console.warn(`⚠️ تخطي مراقبة ${trade.symbol} - لا توجد بيانات حقيقية`);
+        continue;
+      }
+      
+      const { optionPrice, stockPrice } = priceData;
       tradePrices.set(trade.id, { price: optionPrice, lastUpdate: Date.now() });
 
       // Send price update every minute

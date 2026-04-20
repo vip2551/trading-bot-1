@@ -35,47 +35,39 @@ let config: AutoTraderConfig = {
 };
 
 let lastAutoTrade = new Map<string, number>();
-let marketData = new Map<string, { price: number; change: number; volume: number; timestamp: number }>();
+let marketData = new Map<string, { price: number; change: number; volume: number; timestamp: number; isReal: boolean }>();
 let tradingLogs: Array<{ time: Date; type: string; message: string; data?: any }> = [];
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 📊 MARKET DATA FETCHING
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function fetchMarketData(symbol: string): Promise<{ price: number; change: number; volume: number } | null> {
+async function fetchMarketData(symbol: string): Promise<{ price: number; change: number; volume: number; isReal: boolean } | null> {
   try {
     // Try main app price API
-    const res = await fetch(`http://localhost:3000/api/price?symbol=${symbol}`);
+    const res = await fetch(`http://localhost:3000/api/price?symbol=${symbol}`, {
+      signal: AbortSignal.timeout(5000) // 5 second timeout
+    });
     if (res.ok) {
       const data = await res.json();
-      return {
-        price: data.price || data.spotPrice || 0,
-        change: data.change || 0,
-        volume: data.volume || 0
-      };
+      // Only return if we have valid price data
+      if (data.price || data.spotPrice) {
+        return {
+          price: data.price || data.spotPrice || 0,
+          change: data.change || 0,
+          volume: data.volume || 0,
+          isReal: true
+        };
+      }
     }
   } catch (e) {
-    // Fallback to simulated data
+    log('ERROR', `⚠️ فشل الحصول على بيانات حقيقية لـ ${symbol}`, { error: String(e) });
   }
 
-  // Simulate market data for demo
-  const basePrices: Record<string, number> = {
-    'SPX': 5850,
-    'SPY': 585,
-    'QQQ': 485,
-    'AAPL': 185,
-    'TSLA': 250
-  };
-  
-  const basePrice = basePrices[symbol] || 100;
-  const volatility = (Math.random() - 0.5) * 2;
-  const trend = Math.sin(Date.now() / 3600000) * 0.5; // Hourly trend
-  
-  return {
-    price: basePrice * (1 + trend / 100) + volatility,
-    change: trend + volatility,
-    volume: Math.floor(1000000 + Math.random() * 5000000)
-  };
+  // ⚠️ CRITICAL: Do NOT use simulated data for trading decisions
+  // Return null to indicate no real data available
+  log('WARN', `🚫 لا توجد بيانات حقيقية لـ ${symbol} - لن يتم التداول`);
+  return null;
 }
 
 async function fetchAllMarketData(): Promise<void> {
@@ -103,52 +95,46 @@ interface TechnicalAnalysis {
   reasons: string[];
 }
 
-function analyzeSymbol(symbol: string): TechnicalAnalysis {
+function analyzeSymbol(symbol: string): TechnicalAnalysis | null {
   const data = marketData.get(symbol);
-  const price = data?.price || 5000;
   
-  // Simulate RSI based on price movement
-  const rsiBase = 50 + (data?.change || 0) * 5;
-  const rsi = Math.max(10, Math.min(90, rsiBase + (Math.random() - 0.5) * 20));
+  // ⚠️ CRITICAL: Do not analyze without real market data
+  if (!data || !data.isReal) {
+    log('WARN', `⚠️ لا توجد بيانات حقيقية لـ ${symbol} - تخطي التحليل`);
+    return null;
+  }
   
-  // Simulate MACD
-  const macdValue = (data?.change || 0) * 0.5;
-  const macdSignal = macdValue * 0.8;
-  const histogram = macdValue - macdSignal;
+  const price = data.price;
   
-  // Determine trend
+  // TODO: Implement real technical analysis using historical price data
+  // For now, use a simple momentum-based analysis
+  const momentum = data.change;
+  
+  // Simple trend determination based on actual price change
   let trend: TechnicalAnalysis['trend'] = 'NEUTRAL';
   let trendStrength = 50;
   const reasons: string[] = [];
   
-  if (rsi < 30) {
-    trend = 'BULLISH';
-    trendStrength = 70;
-    reasons.push('RSI في منطقة التشبع البيعي - إشارة صعودية');
-  } else if (rsi > 70) {
-    trend = 'BEARISH';
-    trendStrength = 70;
-    reasons.push('RSI في منطقة التشبع الشرائي - إشارة هبوطية');
-  } else if (histogram > 0.5) {
+  if (momentum > 1) {
     trend = 'STRONG_BULLISH';
-    trendStrength = 80;
-    reasons.push('MACD يعطي إشارة صعودية قوية');
-  } else if (histogram < -0.5) {
-    trend = 'STRONG_BEARISH';
-    trendStrength = 80;
-    reasons.push('MACD يعطي إشارة هبوطية قوية');
-  } else if (histogram > 0) {
+    trendStrength = 75;
+    reasons.push(`زخم صعودي قوي: +${momentum.toFixed(2)}%`);
+  } else if (momentum > 0.3) {
     trend = 'BULLISH';
-    trendStrength = 60;
-    reasons.push('MACD صعودي');
-  } else if (histogram < 0) {
+    trendStrength = 65;
+    reasons.push(`زخم صعودي: +${momentum.toFixed(2)}%`);
+  } else if (momentum < -1) {
+    trend = 'STRONG_BEARISH';
+    trendStrength = 75;
+    reasons.push(`زخم هبوطي قوي: ${momentum.toFixed(2)}%`);
+  } else if (momentum < -0.3) {
     trend = 'BEARISH';
-    trendStrength = 60;
-    reasons.push('MACD هبوطي');
+    trendStrength = 65;
+    reasons.push(`زخم هبوطي: ${momentum.toFixed(2)}%`);
   }
   
-  // Add volume analysis
-  if ((data?.volume || 0) > 3000000) {
+  // Volume confirmation
+  if (data.volume > 3000000) {
     reasons.push('حجم تداول عالي - تأكيد الإشارة');
     trendStrength = Math.min(100, trendStrength + 10);
   }
@@ -157,25 +143,25 @@ function analyzeSymbol(symbol: string): TechnicalAnalysis {
   let signal: TechnicalAnalysis['signal'] = 'HOLD';
   let confidence = trendStrength;
   
-  if (trend === 'STRONG_BULLISH' && rsi < 65) {
+  if (trend === 'STRONG_BULLISH') {
     signal = 'STRONG_BUY';
-    confidence = 85;
-  } else if (trend === 'BULLISH' && rsi < 70) {
+    confidence = 80;
+  } else if (trend === 'BULLISH') {
     signal = 'BUY';
-    confidence = 75;
-  } else if (trend === 'STRONG_BEARISH' && rsi > 35) {
+    confidence = 70;
+  } else if (trend === 'STRONG_BEARISH') {
     signal = 'STRONG_SELL';
-    confidence = 85;
-  } else if (trend === 'BEARISH' && rsi > 30) {
+    confidence = 80;
+  } else if (trend === 'BEARISH') {
     signal = 'SELL';
-    confidence = 75;
+    confidence = 70;
   }
   
   return {
     symbol,
     price,
-    rsi: Math.round(rsi * 10) / 10,
-    macd: { value: macdValue, signal: macdSignal, histogram: Math.round(histogram * 100) / 100 },
+    rsi: 50, // Placeholder - needs real calculation from price history
+    macd: { value: momentum * 0.5, signal: momentum * 0.4, histogram: momentum * 0.1 },
     trend,
     trendStrength: Math.round(trendStrength),
     signal,
@@ -374,6 +360,13 @@ async function runAutoTradingCycle(): Promise<void> {
   // Fetch market data
   await fetchAllMarketData();
   
+  // Check if we have any real market data
+  const hasRealData = Array.from(marketData.values()).some(d => d.isReal);
+  if (!hasRealData) {
+    log('ERROR', '🚫 لا توجد بيانات حقيقية - إيقاف التداول التلقائي');
+    return;
+  }
+  
   // Get current positions
   const positions = await getOpenPositions();
   
@@ -384,6 +377,10 @@ async function runAutoTradingCycle(): Promise<void> {
   if (config.autoExitEnabled) {
     for (const trade of positions) {
       const analysis = analyzeSymbol(trade.symbol);
+      if (!analysis) {
+        log('WARN', `⚠️ تخطي تحليل ${trade.symbol} - لا توجد بيانات حقيقية`);
+        continue;
+      }
       const { shouldExit, reason } = await evaluateExitDecision(trade, analysis);
       
       if (shouldExit) {
@@ -404,6 +401,9 @@ async function runAutoTradingCycle(): Promise<void> {
       }
       
       const analysis = analyzeSymbol(symbol);
+      if (!analysis) {
+        continue; // Skip symbols without real data
+      }
       const { shouldEnter, direction, reasons } = await evaluateEntryDecision(analysis);
       
       if (shouldEnter && direction) {
