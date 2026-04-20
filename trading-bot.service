@@ -1,0 +1,25 @@
+[Unit]
+Description=Trading Bot Pro - Production Server
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/trading-bot-pro-main
+ExecStart=/bin/bash /root/trading-bot-pro-main/start-server.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment=NODE_ENV=production
+EnvironmentFile=/root/trading-bot-pro-main/.env
+
+# Auto-restart on crash
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
