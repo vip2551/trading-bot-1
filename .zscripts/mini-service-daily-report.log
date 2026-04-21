@@ -1,9 +1,10 @@
 [daily-report] Installing dependencies...
 bun install v1.3.12 (700fc117)
 
-Checked 1 install across 2 packages (no changes) [15.00ms]
+Checked 1 install across 2 packages (no changes) [7.00ms]
 [daily-report] Running bun run dev...
-$ bun --hot index.t�📊 Daily Report Service Started
+$ bun --hot index.ts
+📊 Daily Report Service Started
 ⏰ Report will be sent at 23:00 (Asia/Riyadh)
 380 |     await sendDailyReport();
 381 |   }
@@ -18,5 +19,4 @@ error: Failed to start server. Is port 3005 in use?
     code: "EADDRINUSE"
 
       at /home/z/my-project/mini-services/daily-report/index.ts:385:1
-      at loadAndEvaluateModule (2:1error: script "dev" was terminated by signal SIGTERM (Polite quit request)
-)
+      at loadAndEvaluateModule (2:1)

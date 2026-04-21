@@ -2,22 +2,20 @@
 bun install v1.3.12 (700fc117)
 No packages! Deleted empty lockfile
 
-[11.00ms] done
+[18.00ms] done
 [auto-trader] Running bun run dev...
 $ bun --hot run index.ts
-435 | 
-436 | // ═══════════════════════error: script "dev" was terminated by signal SIGTERM (Polite quit request)
-═══════════════════════════════
-437 | // 🚀 HTTP SERVER
-438 | // ═══════════════════════════════════════════════════════════════════════════════
-439 | 
-440 | serve({
+702 | 
+703 | // ═══════════════════════════════════════════════════════════════════════════════
+704 | // 🚀 HTTP SERVER
+705 | // ═══════════════════════════════════════════════════════════════════════════════
+706 | 
+707 | serve({
       ^
 error: Failed to start server. Is port 3005 in use?
  syscall: "listen",
    errno: 0,
     code: "EADDRINUSE"
 
-      at /home/z/my-project/mini-services/auto-trader/index.ts:440:1
+      at /home/z/my-project/mini-services/auto-trader/index.ts:707:1
       at loadAndEvaluateModule (2:1)
-error: script "dev" was terminated by signal SIGTERM (Polite quit request)

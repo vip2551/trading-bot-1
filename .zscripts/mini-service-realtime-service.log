@@ -1,15 +1,22 @@
 [realtime-service] Installing dependencies...
 bun install v1.3.12 (700fc117)
 
-Checked 22 installs across 23 packages (no changes) [50.00ms]
+Checked 22 installs across 23 packages (no changes) [27.00ms]
 [realtime-service] Running bun run dev...
-$ bun --hot46 |     }
+$ bun --hot index.ts
+╔════════════════════════════════════════════════════════════╗
+║       📡 REAL-TIME SERVICE - SAFE MODE                    ║
+╠════════════════════════════════════════════════════════════╣
+║ 📝 Mode: Paper Trading                                   ║
+║ 📡 Port: 3006                                               ║
+║ 🔒 Allow Fake Data: false                           ║
+╚════════════════════════════════════════════════════════════╝
+46 |     }
 47 |   }
 48 |   let er;
 49 |   if (args.length > 0)
 50 |     er = args[0];
 51 |     throw er;
                  ^
-error: Failed to start server. Is port 3004 in use?
+error: Failed to start server. Is port 3006 in use?
       at emitError (node:events:51:13)
-error: screrror: script "dev" was terminated by signal SIGTERM (Polite quit request)
