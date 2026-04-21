@@ -1,7 +1,12 @@
 /**
- * Telegram Bot Service
- * Handles notifications and commands via Telegram
- * Supports Arabic and English notifications
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 📱 TELEGRAM NOTIFICATION SERVICE
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * إرسال إشعارات فورية لتيليجرام
+ * - تنبيهات الصفقات
+ * - تحذيرات المخاطر
+ * - تقارير يومية
  */
 
 import { db } from './db';
@@ -10,629 +15,312 @@ export interface TelegramConfig {
   botToken: string;
   chatId: string;
   enabled: boolean;
-  language: 'ar' | 'en';
-  notifications: TelegramNotifications;
 }
 
-export interface TelegramNotifications {
-  tradeExecuted: boolean;
-  tradeClosed: boolean;
-  orderFilled: boolean;
-  dailyReport: boolean;
-  weeklyReport: boolean;
-  errorAlerts: boolean;
-  systemAlerts: boolean;
-  whaleActivity: boolean;
-  priceUpdates: boolean;
+export interface TradeNotification {
+  type: 'TRADE_OPENED' | 'TRADE_CLOSED' | 'TRADE_REJECTED' | 'RISK_WARNING' | 'DAILY_REPORT' | 'SYSTEM_ALERT';
+  symbol?: string;
+  action?: string;
+  quantity?: number;
+  price?: number;
+  pnl?: number;
+  reason?: string;
+  message?: string;
 }
 
-export interface TelegramMessage {
-  chatId: string;
-  text: string;
-  parseMode?: 'HTML' | 'Markdown' | 'MarkdownV2';
-  disableNotification?: boolean;
-}
-
-export interface TelegramUser {
-  id: number;
-  isBot: boolean;
-  firstName: string;
-  lastName?: string;
-  username?: string;
-  languageCode?: string;
-}
-
-export interface TelegramChat {
-  id: number;
-  type: 'private' | 'group' | 'supergroup' | 'channel';
-  title?: string;
-  username?: string;
-  firstName?: string;
-  lastName?: string;
-}
-
-// Arabic translations
-const ARABIC = {
-  tradeOpened: '🔔 تم فتح صفقة جديدة',
-  tradeClosed: '✅ تم إغلاق الصفقة',
-  priceUpdate: '📊 تحديث السعر',
-  symbol: 'السهم',
-  strike: 'الاسترايك',
-  strikePrice: 'سعر الاسترايك',
-  stockPrice: 'السعر الحالي للسهم',
-  direction: 'الاتجاه',
-  contracts: 'عدد العقود',
-  currentPrice: 'السعر الحالي',
-  entryPrice: 'سعر الدخول',
-  exitPrice: 'سعر الخروج',
-  pnl: 'الربح/الخسارة',
-  executionTime: 'وقت التنفيذ',
-  closeTime: 'وقت الإغلاق',
-  call: 'كول 📈',
-  put: 'بوت 📉',
-  callEmoji: '📈 كول',
-  putEmoji: '📉 بوت',
-  profit: 'ربح',
-  loss: 'خسارة',
-  fromBot: 'بوت التداول برو',
-  dailyReport: '📊 التقرير اليومي',
-  totalTrades: 'إجمالي الصفقات',
-  winRate: 'نسبة الفوز',
-  error: '⚠️ تنبيه خطأ',
-  systemAlert: 'ℹ️ تنبيه النظام',
-};
-
-// English translations
-const ENGLISH = {
-  tradeOpened: '🔔 New Trade Opened',
-  tradeClosed: '✅ Trade Closed',
-  priceUpdate: '📊 Price Update',
-  symbol: 'Symbol',
-  strike: 'Strike',
-  strikePrice: 'Strike Price',
-  stockPrice: 'Stock Price',
-  direction: 'Direction',
-  contracts: 'Contracts',
-  currentPrice: 'Current Price',
-  entryPrice: 'Entry Price',
-  exitPrice: 'Exit Price',
-  pnl: 'P&L',
-  executionTime: 'Execution Time',
-  closeTime: 'Close Time',
-  call: 'CALL 📈',
-  put: 'PUT 📉',
-  callEmoji: '📈 CALL',
-  putEmoji: '📉 PUT',
-  profit: 'Profit',
-  loss: 'Loss',
-  fromBot: 'Trading Bot Pro',
-  dailyReport: '📊 Daily Report',
-  totalTrades: 'Total Trades',
-  winRate: 'Win Rate',
-  error: '⚠️ Error Alert',
-  systemAlert: 'ℹ️ System Alert',
-};
-
-// Telegram Bot Service
-export class TelegramService {
+class TelegramService {
   private config: TelegramConfig | null = null;
-  private baseUrl: string = '';
-  private lastUpdateId: number = 0;
-  private pollingInterval: NodeJS.Timeout | null = null;
-  private priceUpdateInterval: NodeJS.Timeout | null = null;
+  private lastSentTime: number = 0;
+  private minIntervalMs: number = 1000; // ثانية واحدة بين الرسائل
 
-  constructor() {}
-
-  // Get translation
-  private t(key: keyof typeof ARABIC, fallback?: string): string {
-    if (!this.config) return ENGLISH[key] || fallback || key;
-    return this.config.language === 'ar' ? (ARABIC[key] || fallback || key) : (ENGLISH[key] || fallback || key);
-  }
-
-  // Configure the bot
-  configure(config: TelegramConfig): void {
-    this.config = config;
-    this.baseUrl = `https://api.telegram.org/bot${config.botToken}`;
-  }
-
-  // Test bot connection
-  async testConnection(): Promise<{ success: boolean; botInfo?: any; error?: string }> {
-    if (!this.config?.botToken) {
-      return { success: false, error: 'Bot token not configured' };
-    }
-
+  /**
+   * تحميل الإعدادات من قاعدة البيانات
+   */
+  async loadConfig(): Promise<TelegramConfig | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/getMe`);
-      const data = await response.json();
-
-      if (data.ok) {
-        return { success: true, botInfo: data.result };
-      } else {
-        return { success: false, error: data.description };
+      const settings = await db.botSettings.findFirst();
+      if (settings?.telegramEnabled && settings.telegramBotToken && settings.telegramChatId) {
+        this.config = {
+          botToken: settings.telegramBotToken,
+          chatId: settings.telegramChatId,
+          enabled: true
+        };
+        return this.config;
       }
-    } catch (error: any) {
-      return { success: false, error: error.message };
+    } catch (error) {
+      console.error('[TELEGRAM] Error loading config:', error);
     }
+    return null;
   }
 
-  // Get chat info
-  async getChatInfo(chatId: string): Promise<{ success: boolean; chat?: TelegramChat; error?: string }> {
-    if (!this.config?.botToken) {
-      return { success: false, error: 'Bot token not configured' };
+  /**
+   * إرسال رسالة لتيليجرام
+   */
+  async sendMessage(message: string, parseMode: 'HTML' | 'Markdown' = 'HTML'): Promise<boolean> {
+    // التحقق من الحد الأدنى بين الرسائل
+    const now = Date.now();
+    if (now - this.lastSentTime < this.minIntervalMs) {
+      await new Promise(resolve => setTimeout(resolve, this.minIntervalMs));
+    }
+
+    if (!this.config) {
+      await this.loadConfig();
+    }
+
+    if (!this.config?.enabled || !this.config.botToken || !this.config.chatId) {
+      console.log('[TELEGRAM] Not configured or disabled');
+      return false;
     }
 
     try {
-      const response = await fetch(`${this.baseUrl}/getChat?chat_id=${chatId}`);
-      const data = await response.json();
-
-      if (data.ok) {
-        return { success: true, chat: data.result };
-      } else {
-        return { success: false, error: data.description };
-      }
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
-  }
-
-  // Send message
-  async sendMessage(message: TelegramMessage, skipEnabledCheck = false): Promise<{ success: boolean; messageId?: number; error?: string }> {
-    if (!this.config?.botToken) {
-      return { success: false, error: 'Bot token not configured' };
-    }
-    
-    if (!skipEnabledCheck && !this.config.enabled) {
-      return { success: false, error: 'Telegram notifications are disabled' };
-    }
-
-    try {
-      const body: any = {
-        chat_id: message.chatId,
-        text: message.text,
-        parse_mode: message.parseMode || 'HTML',
-        disable_notification: message.disableNotification || false
-      };
-
-      const response = await fetch(`${this.baseUrl}/sendMessage`, {
+      const url = `https://api.telegram.org/bot${this.config.botToken}/sendMessage`;
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify({
+          chat_id: this.config.chatId,
+          text: message,
+          parse_mode: parseMode,
+          disable_web_page_preview: true
+        })
       });
 
       const data = await response.json();
-
-      if (data.ok) {
-        return { success: true, messageId: data.result.message_id };
-      } else {
-        return { success: false, error: data.description || 'Unknown Telegram API error' };
+      
+      if (!data.ok) {
+        console.error('[TELEGRAM] Error:', data.description);
+        return false;
       }
-    } catch (error: any) {
-      return { success: false, error: `Network error: ${error.message}` };
+
+      this.lastSentTime = now;
+      console.log('[TELEGRAM] ✅ Message sent successfully');
+      return true;
+    } catch (error) {
+      console.error('[TELEGRAM] Send error:', error);
+      return false;
     }
   }
 
-  // Send trade opened notification (Arabic)
-  async sendTradeOpenedNotification(trade: {
+  /**
+   * إرسال إشعار صفقة جديدة
+   */
+  async notifyTradeOpened(params: {
     symbol: string;
-    direction: 'CALL' | 'PUT';
-    strike: number;
-    strikePrice: number;
-    contracts: number;
-    stockPrice: number;
-    entryPrice: number;
-    executionTime: Date;
-  }): Promise<{ success: boolean; error?: string }> {
-    if (!this.config?.enabled || !this.config.notifications.tradeExecuted) {
-      return { success: false, error: 'Notifications disabled' };
-    }
-
-    const isArabic = this.config.language === 'ar';
-    const directionText = trade.direction === 'CALL' ? this.t('callEmoji') : this.t('putEmoji');
-    const time = trade.executionTime.toLocaleString(isArabic ? 'ar-SA' : 'en-US');
-
+    action: string;
+    quantity: number;
+    price: number;
+    stopLoss?: number;
+    takeProfit?: number;
+    strategy?: string;
+    mode: string;
+    ibOrderId?: number;
+  }): Promise<boolean> {
+    const { symbol, action, quantity, price, stopLoss, takeProfit, strategy, mode, ibOrderId } = params;
+    
+    const modeEmoji = mode === 'LIVE' ? '🔴' : mode === 'PAPER' ? '🟡' : '⚪';
+    const actionEmoji = action === 'BUY' || action === 'LONG' || action === 'CALL' ? '🟢' : '🔴';
+    
     const message = `
-<b>${this.t('tradeOpened')}</b>
+${modeEmoji} <b>صفقة جديدة</b> ${modeEmoji}
 
-${trade.direction === 'CALL' ? '📈' : '📉'} <b>${trade.symbol}</b> ${directionText}
-━━━━━━━━━━━━━━━
-📌 <b>${this.t('strike')}:</b> ${trade.strike}
-💰 <b>${this.t('strikePrice')}:</b> $${trade.strikePrice.toFixed(2)}
-📊 <b>${this.t('stockPrice')}:</b> $${trade.stockPrice.toFixed(2)}
-📝 <b>${this.t('contracts')}:</b> ${trade.contracts}
-💵 <b>${this.t('entryPrice')}:</b> $${trade.entryPrice.toFixed(2)}
-⏰ <b>${this.t('executionTime')}:</b> ${time}
+${actionEmoji} <b>${action}</b> ${quantity}x ${symbol}
+💰 السعر: $${price.toFixed(2)}
+${stopLoss ? `🛑 SL: $${stopLoss.toFixed(2)}` : ''}
+${takeProfit ? `🎯 TP: $${takeProfit.toFixed(2)}` : ''}
+${strategy ? `📊 الاستراتيجية: ${strategy}` : ''}
+${ibOrderId ? `📋 IB Order: #${ibOrderId}` : ''}
+⚙️ الوضع: ${mode}
 
-<i>${this.t('fromBot')}</i>
-`;
+⏰ ${new Date().toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' })}
+`.trim();
 
-    const result = await this.sendMessage({
-      chatId: this.config.chatId,
-      text: message,
-      parseMode: 'HTML'
-    });
-
-    return result;
+    return this.sendMessage(message);
   }
 
-  // Send price update notification
-  async sendPriceUpdateNotification(update: {
+  /**
+   * إرسال إشعار إغلاق صفقة
+   */
+  async notifyTradeClosed(params: {
     symbol: string;
-    direction: 'CALL' | 'PUT';
-    strike: number;
-    currentPrice: number;
-    stockPrice: number;
-    pnl: number;
-    contracts: number;
-  }): Promise<{ success: boolean; error?: string }> {
-    if (!this.config?.enabled || !this.config.notifications.priceUpdates) {
-      return { success: false, error: 'Price updates disabled' };
-    }
-
-    const isArabic = this.config.language === 'ar';
-    const directionText = update.direction === 'CALL' ? this.t('callEmoji') : this.t('putEmoji');
-    const pnlEmoji = update.pnl >= 0 ? '🟢' : '🔴';
-    const time = new Date().toLocaleString(isArabic ? 'ar-SA' : 'en-US');
-
-    const message = `
-<b>${this.t('priceUpdate')}</b> ⏱️
-
-${update.direction === 'CALL' ? '📈' : '📉'} <b>${update.symbol}</b> ${directionText}
-━━━━━━━━━━━━━━━
-📌 <b>${this.t('strike')}:</b> ${update.strike}
-💰 <b>${this.t('currentPrice')}:</b> $${update.currentPrice.toFixed(2)}
-📊 <b>${this.t('stockPrice')}:</b> $${update.stockPrice.toFixed(2)}
-${pnlEmoji} <b>${this.t('pnl')}:</b> ${update.pnl >= 0 ? '+' : ''}$${update.pnl.toFixed(2)}
-
-⏰ ${time}
-`;
-
-    const result = await this.sendMessage({
-      chatId: this.config.chatId,
-      text: message,
-      parseMode: 'HTML',
-      disableNotification: true // Silent notification for price updates
-    });
-
-    return result;
-  }
-
-  // Send trade closed notification
-  async sendTradeClosedNotification(trade: {
-    symbol: string;
-    direction: 'CALL' | 'PUT';
-    strike: number;
-    contracts: number;
+    action: string;
+    quantity: number;
     entryPrice: number;
     exitPrice: number;
     pnl: number;
-    openTime: Date;
-    closeTime: Date;
-  }): Promise<{ success: boolean; error?: string }> {
-    if (!this.config?.enabled || !this.config.notifications.tradeClosed) {
-      return { success: false, error: 'Notifications disabled' };
-    }
-
-    const isArabic = this.config.language === 'ar';
-    const directionText = trade.direction === 'CALL' ? this.t('callEmoji') : this.t('putEmoji');
-    const pnlEmoji = trade.pnl >= 0 ? '🟢' : '🔴';
-    const resultText = trade.pnl >= 0 ? this.t('profit') : this.t('loss');
-    const openTime = trade.openTime.toLocaleString(isArabic ? 'ar-SA' : 'en-US');
-    const closeTime = trade.closeTime.toLocaleString(isArabic ? 'ar-SA' : 'en-US');
-
-    const message = `
-<b>${this.t('tradeClosed')}</b> ${pnlEmoji}
-
-${trade.direction === 'CALL' ? '📈' : '📉'} <b>${trade.symbol}</b> ${directionText}
-━━━━━━━━━━━━━━━
-📌 <b>${this.t('strike')}:</b> ${trade.strike}
-📝 <b>${this.t('contracts')}:</b> ${trade.contracts}
-💵 <b>${this.t('entryPrice')}:</b> $${trade.entryPrice.toFixed(2)}
-🔚 <b>${this.t('exitPrice')}:</b> $${trade.exitPrice.toFixed(2)}
-${pnlEmoji} <b>${this.t('pnl')}:</b> ${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)} (${resultText})
-
-⏰ <b>${this.t('executionTime')}:</b> ${openTime}
-🏁 <b>${this.t('closeTime')}:</b> ${closeTime}
-
-<i>${this.t('fromBot')}</i>
-`;
-
-    const result = await this.sendMessage({
-      chatId: this.config.chatId,
-      text: message,
-      parseMode: 'HTML'
-    });
-
-    return result;
-  }
-
-  // Send trade notification (legacy - kept for compatibility)
-  async sendTradeNotification(trade: {
-    symbol: string;
-    direction: string;
-    quantity: number;
-    entryPrice: number;
-    status: string;
-    pnl?: number;
-    strike?: number;
-    strikePrice?: number;
-    stockPrice?: number;
-  }): Promise<void> {
-    if (!this.config?.enabled || !this.config.notifications.tradeExecuted) return;
-
-    const isArabic = this.config.language === 'ar';
-    const directionText = trade.direction === 'CALL' || trade.direction === 'BUY' 
-      ? (isArabic ? '📈 كول' : '📈 CALL') 
-      : (isArabic ? '📉 بوت' : '📉 PUT');
-    const pnlEmoji = trade.pnl && trade.pnl >= 0 ? '🟢' : '🔴';
-    const time = new Date().toLocaleString(isArabic ? 'ar-SA' : 'en-US');
+    pnlPercent: number;
+    closeReason?: string;
+    duration?: number;
+  }): Promise<boolean> {
+    const { symbol, action, quantity, entryPrice, exitPrice, pnl, pnlPercent, closeReason, duration } = params;
+    
+    const isProfit = pnl > 0;
+    const pnlEmoji = isProfit ? '🟢💰' : '🔴📉';
     
     const message = `
-<b>${isArabic ? '🔔 صفقة ' + trade.status : '🔔 Trade ' + trade.status}</b>
+${pnlEmoji} <b>صفقة مغلقة</b>
 
-${directionText} <b>${trade.symbol}</b>
-━━━━━━━━━━━━━━━
-${trade.strike ? `<b>${isArabic ? '📌 الاسترايك:' : '📌 Strike:'}</b> ${trade.strike}` : ''}
-${trade.strikePrice ? `<b>${isArabic ? '💰 سعر الاسترايك:' : '💰 Strike Price:'}</b> $${trade.strikePrice.toFixed(2)}` : ''}
-${trade.stockPrice ? `<b>${isArabic ? '📊 سعر السهم:' : '📊 Stock Price:'}</b> $${trade.stockPrice.toFixed(2)}` : ''}
-<b>${isArabic ? '📝 الكمية:' : '📝 Quantity:'}</b> ${trade.quantity}
-<b>${isArabic ? '💵 سعر الدخول:' : '💵 Entry Price:'}</b> $${trade.entryPrice.toFixed(2)}
-${trade.pnl ? `<b>${isArabic ? '📊 الربح/الخسارة:' : '📊 P&L:'}</b> ${pnlEmoji} $${trade.pnl.toFixed(2)}` : ''}
-<b>${isArabic ? '⏰ الوقت:' : '⏰ Time:'}</b> ${time}
+${action} ${quantity}x ${symbol}
+📥 الدخول: $${entryPrice.toFixed(2)}
+📤 الخروج: $${exitPrice.toFixed(2)}
 
-<i>${this.t('fromBot')}</i>
-`;
+${isProfit ? '📈 الربح' : '📉 الخسارة'}: $${Math.abs(pnl).toFixed(2)} (${pnlPercent > 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)
+${closeReason ? `📝 السبب: ${closeReason}` : ''}
+${duration ? `⏱️ المدة: ${Math.round(duration / 60000)} دقيقة` : ''}
 
-    await this.sendMessage({
-      chatId: this.config.chatId,
-      text: message,
-      parseMode: 'HTML'
-    });
+⏰ ${new Date().toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' })}
+`.trim();
+
+    return this.sendMessage(message);
   }
 
-  // Send whale activity alert
-  async sendWhaleAlert(whale: {
-    symbol: string;
-    direction: string;
-    volume: number;
-    confidence: number;
-  }): Promise<void> {
-    if (!this.config?.enabled || !this.config.notifications.whaleActivity) return;
+  /**
+   * إرسال تحذير مخاطر
+   */
+  async notifyRiskWarning(params: {
+    type: 'DAILY_LOSS_LIMIT' | 'MAX_POSITIONS' | 'NEWS_BLOCK' | 'IB_DISCONNECTED';
+    message: string;
+    current?: number;
+    limit?: number;
+  }): Promise<boolean> {
+    const { type, message: msg, current, limit } = params;
+    
+    const typeEmojis: Record<string, string> = {
+      'DAILY_LOSS_LIMIT': '🚨📉',
+      'MAX_POSITIONS': '⚠️📊',
+      'NEWS_BLOCK': '📰⛔',
+      'IB_DISCONNECTED': '🔌❌'
+    };
+    
+    const typeNames: Record<string, string> = {
+      'DAILY_LOSS_LIMIT': 'حد الخسارة اليومية',
+      'MAX_POSITIONS': 'حد الصفقات المفتوحة',
+      'NEWS_BLOCK': 'فلتر الأخبار',
+      'IB_DISCONNECTED': 'انقطاع IB'
+    };
 
-    const isArabic = this.config.language === 'ar';
-    const emoji = whale.direction === 'BULLISH' ? '🐋' : '🐻';
+    const message = `
+${typeEmojis[type] || '⚠️'} <b>تحذير: ${typeNames[type] || type}</b>
+
+${msg}
+${current !== undefined ? `📊 الحالي: ${current}` : ''}
+${limit !== undefined ? `🎯 الحد: ${limit}` : ''}
+
+⏰ ${new Date().toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' })}
+`.trim();
+
+    return this.sendMessage(message);
+  }
+
+  /**
+   * إرسال إشعار رفض صفقة
+   */
+  async notifyTradeRejected(params: {
+    symbol: string;
+    action: string;
+    reason: string;
+    mode: string;
+  }): Promise<boolean> {
+    const { symbol, action, reason, mode } = params;
     
     const message = `
-<b>${emoji} ${isArabic ? 'تم رصد نشاط حيتان!' : 'Whale Activity Detected!'}</b>
+⛔ <b>صفقة مرفوضة</b>
 
-<b>${isArabic ? 'السهم:' : 'Symbol:'}</b> ${whale.symbol}
-<b>${isArabic ? 'الاتجاه:' : 'Direction:'}</b> ${whale.direction}
-<b>${isArabic ? 'الحجم:' : 'Volume:'}</b> $${(whale.volume / 1000000).toFixed(2)}M
-<b>${isArabic ? 'الثقة:' : 'Confidence:'}</b> ${whale.confidence}%
+${action} ${symbol}
+📋 السبب: ${reason}
+⚙️ الوضع: ${mode}
 
-<i>${isArabic ? 'تم الكشف بواسطة متتبع الحيتان' : 'Detected by AI Whale Tracker'}</i>
-`;
+⏰ ${new Date().toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' })}
+`.trim();
 
-    await this.sendMessage({
-      chatId: this.config.chatId,
-      text: message,
-      parseMode: 'HTML'
-    });
+    return this.sendMessage(message);
   }
 
-  // Send daily report
-  async sendDailyReport(report: {
+  /**
+   * إرسال تقرير يومي
+   */
+  async sendDailyReport(params: {
     totalTrades: number;
-    winRate: number;
+    winCount: number;
+    lossCount: number;
     totalPnL: number;
-    bestTrade: string;
-    worstTrade: string;
-  }): Promise<void> {
-    if (!this.config?.enabled || !this.config.notifications.dailyReport) return;
-
-    const isArabic = this.config.language === 'ar';
-    const pnlEmoji = report.totalPnL >= 0 ? '🟢' : '🔴';
-    const date = new Date().toLocaleDateString(isArabic ? 'ar-SA' : 'en-US');
+    winRate: number;
+    accountBalance: number;
+    openPositions: number;
+  }): Promise<boolean> {
+    const { totalTrades, winCount, lossCount, totalPnL, winRate, accountBalance, openPositions } = params;
+    
+    const isProfit = totalPnL >= 0;
     
     const message = `
-<b>${this.t('dailyReport')}</b>
-<i>${date}</i>
+📊 <b>التقرير اليومي</b>
 
-━━━━━━━━━━━━━━━
-<b>📈 ${this.t('totalTrades')}:</b> ${report.totalTrades}
-<b>🎯 ${this.t('winRate')}:</b> ${report.winRate.toFixed(1)}%
-<b>${pnlEmoji} ${this.t('pnl')}:</b> ${report.totalPnL >= 0 ? '+' : ''}$${report.totalPnL.toFixed(2)}
+📈 <b>ملخص الصفقات:</b>
+• الإجمالي: ${totalTrades} صفقة
+• 🟢 رابحة: ${winCount}
+• 🔴 خاسرة: ${lossCount}
+• 📊 نسبة الفوز: ${winRate.toFixed(1)}%
 
-<b>🏆 ${isArabic ? 'أفضل صفقة:' : 'Best Trade:'}</b> ${report.bestTrade}
-<b>📉 ${isArabic ? 'أسوأ صفقة:' : 'Worst Trade:'}</b> ${report.worstTrade}
-━━━━━━━━━━━━━━━
+💰 <b>الأداء:</b>
+• P&L: ${isProfit ? '+' : ''}$${totalPnL.toFixed(2)}
+• الرصيد: $${accountBalance.toFixed(2)}
 
-<i>${this.t('fromBot')}</i>
-`;
+📍 <b>الحالي:</b>
+• الصفقات المفتوحة: ${openPositions}
 
-    await this.sendMessage({
-      chatId: this.config.chatId,
-      text: message,
-      parseMode: 'HTML'
-    });
+⏰ ${new Date().toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' })}
+`.trim();
+
+    return this.sendMessage(message);
   }
 
-  // Send error alert
-  async sendErrorAlert(error: {
-    type: string;
-    message: string;
-    timestamp: Date;
-  }): Promise<void> {
-    if (!this.config?.enabled || !this.config.notifications.errorAlerts) return;
-
-    const isArabic = this.config.language === 'ar';
-    const time = error.timestamp.toLocaleString(isArabic ? 'ar-SA' : 'en-US');
-
-    const msg = `
-<b>${this.t('error')}</b>
-
-<b>${isArabic ? 'النوع:' : 'Type:'}</b> ${error.type}
-<b>${isArabic ? 'الرسالة:' : 'Message:'}</b> ${error.message}
-<b>${isArabic ? 'الوقت:' : 'Time:'}</b> ${time}
-
-<i>${isArabic ? 'يرجى التحقق من سجلات البوت' : 'Please check the bot logs for details.'}</i>
-`;
-
-    await this.sendMessage({
-      chatId: this.config.chatId,
-      text: msg,
-      parseMode: 'HTML'
-    });
-  }
-
-  // Send system alert
-  async sendSystemAlert(alert: {
-    type: 'info' | 'warning' | 'critical';
-    message: string;
-  }): Promise<void> {
-    if (!this.config?.enabled || !this.config.notifications.systemAlerts) return;
-
-    const isArabic = this.config.language === 'ar';
-    const emoji = alert.type === 'info' ? 'ℹ️' : alert.type === 'warning' ? '⚠️' : '🚨';
+  /**
+   * إرسال تنبيه نظام
+   */
+  async sendSystemAlert(title: string, message: string, level: 'INFO' | 'WARNING' | 'ERROR' = 'INFO'): Promise<boolean> {
+    const emojis = { INFO: 'ℹ️', WARNING: '⚠️', ERROR: '🚨' };
     
     const msg = `
-<b>${emoji} ${this.t('systemAlert')}</b>
+${emojis[level]} <b>${title}</b>
 
-${alert.message}
+${message}
 
-<b>${isArabic ? 'الوقت:' : 'Time:'}</b> ${new Date().toLocaleString(isArabic ? 'ar-SA' : 'en-US')}
-`;
+⏰ ${new Date().toLocaleString('ar-SA', { timeZone: 'Asia/Riyadh' })}
+`.trim();
 
-    await this.sendMessage({
-      chatId: this.config.chatId,
-      text: msg,
-      parseMode: 'HTML'
-    });
+    return this.sendMessage(msg);
   }
 
-  // Start polling for commands
-  startPolling(handler: (command: string, args: string[], user: TelegramUser) => Promise<void>): void {
-    if (!this.config?.botToken) {
-      console.error('Telegram bot token not configured');
-      return;
-    }
+  /**
+   * اختبار الاتصال
+   */
+  async testConnection(botToken: string, chatId: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: '✅ اختبار ناجح! التطبيق متصل بتيليجرام.',
+          parse_mode: 'HTML'
+        })
+      });
 
-    this.pollingInterval = setInterval(async () => {
-      try {
-        const response = await fetch(
-          `${this.baseUrl}/getUpdates?offset=${this.lastUpdateId + 1}&timeout=1`
-        );
-        const data = await response.json();
-
-        if (data.ok && data.result.length > 0) {
-          for (const update of data.result) {
-            this.lastUpdateId = update.update_id;
-
-            if (update.message?.text) {
-              const text = update.message.text;
-              const parts = text.split(' ');
-              const command = parts[0].toLowerCase();
-              const args = parts.slice(1);
-
-              await handler(command, args, update.message.from);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Telegram polling error:', error);
+      const data = await response.json();
+      
+      if (data.ok) {
+        return { success: true, message: 'تم إرسال رسالة الاختبار بنجاح!' };
+      } else {
+        return { success: false, message: data.description || 'فشل الإرسال' };
       }
-    }, 2000);
-  }
-
-  // Stop polling
-  stopPolling(): void {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
+    } catch (error: any) {
+      return { success: false, message: error.message || 'خطأ في الاتصال' };
     }
-    if (this.priceUpdateInterval) {
-      clearInterval(this.priceUpdateInterval);
-      this.priceUpdateInterval = null;
-    }
-  }
-
-  // Get default notifications config
-  static getDefaultNotifications(): TelegramNotifications {
-    return {
-      tradeExecuted: true,
-      tradeClosed: true,
-      orderFilled: true,
-      dailyReport: true,
-      weeklyReport: true,
-      errorAlerts: true,
-      systemAlerts: true,
-      whaleActivity: true,
-      priceUpdates: true
-    };
-  }
-
-  // Validate config
-  static validateConfig(config: TelegramConfig): { valid: boolean; errors: string[] } {
-    const errors: string[] = [];
-
-    if (!config.botToken || config.botToken.trim() === '') {
-      errors.push('Bot token is required');
-    } else if (!config.botToken.match(/^\d+:[A-Za-z0-9_-]{35}$/)) {
-      errors.push('Invalid bot token format');
-    }
-
-    if (!config.chatId || config.chatId.trim() === '') {
-      errors.push('Chat ID is required');
-    }
-
-    return {
-      valid: errors.length === 0,
-      errors
-    };
   }
 }
 
-// Singleton instance
+// Export singleton instance
 export const telegramService = new TelegramService();
-
-// Command handler types
-export type TelegramCommandHandler = (
-  command: string, 
-  args: string[], 
-  user: TelegramUser
-) => Promise<void>;
-
-// Built-in commands
-export const TELEGRAM_COMMANDS = {
-  START: '/start',
-  HELP: '/help',
-  STATUS: '/status',
-  POSITIONS: '/positions',
-  BALANCE: '/balance',
-  TRADING_ON: '/trading_on',
-  TRADING_OFF: '/trading_off',
-  SETTINGS: '/settings',
-  REPORT: '/report',
-  WHALES: '/whales'
-};
-
-export const TELEGRAM_COMMAND_HELP = `
-<b>🤖 Trading Bot Pro - أوامر البوت</b>
-
-<b>Basic Commands | الأوامر الأساسية:</b>
-/start - Start the bot | تشغيل البوت
-/help - Show help | المساعدة
-/status - Bot status | حالة البوت
-
-<b>Trading Commands | أوامر التداول:</b>
-/positions - Open positions | الصفقات المفتوحة
-/balance - Account balance | رصيد الحساب
-/trading_on - Enable trading | تفعيل التداول
-/trading_off - Disable trading | إيقاف التداول
-
-<b>Reports | التقارير:</b>
-/report - Today's report | تقرير اليوم
-/whales - Whale activity | نشاط الحيتان
-
-<b>Settings | الإعدادات:</b>
-/settings - View settings | عرض الإعدادات
-`;
+export default telegramService;

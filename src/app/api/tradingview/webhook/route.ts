@@ -17,6 +17,9 @@ import {
   DEFAULT_RISK_SETTINGS,
   logTradeDecision
 } from '@/lib/trading-protection';
+import { webhookRateLimiter } from '@/lib/rate-limiter';
+import { getRealMarketContext } from '@/lib/market-context';
+import telegramService from '@/lib/telegram-service';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 🔐 التحقق من صحة الإشارة - SIGNAL VALIDATION
@@ -248,6 +251,29 @@ export async function POST(request: NextRequest) {
                request.headers.get('x-real-ip') ||
                'unknown';
 
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // 🛡️ RATE LIMITING - حماية من الهجمات
+    // ═══════════════════════════════════════════════════════════════════════════════
+    const rateLimitCheck = webhookRateLimiter.check(ip);
+    if (!rateLimitCheck.allowed) {
+      console.log(`🚫 [RATE-LIMIT] IP ${ip} blocked. Reset in ${rateLimitCheck.resetIn}s`);
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Too many requests',
+          resetIn: rateLimitCheck.resetIn,
+          reason: rateLimitCheck.reason
+        },
+        { 
+          status: 429,
+          headers: {
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': String(rateLimitCheck.resetIn || 60)
+          }
+        }
+      );
+    }
+
     // حفظ الـ headers
     request.headers.forEach((value, key) => {
       headersData[key] = value;
@@ -425,6 +451,12 @@ export async function POST(request: NextRequest) {
 
     // إذا كان التداول التلقائي مفعل لهذا الرمز
     if (watchlistItem) {
+      // ═════════════════════════════════════════════════════════════════════════
+      // 📊 جلب البيانات الحقيقية من IB وقاعدة البيانات
+      // ═════════════════════════════════════════════════════════════════════════
+      console.log('📊 [WEBHOOK] Fetching real market context...');
+      const realMarketContext = await getRealMarketContext();
+      
       // إعداد بيانات الإشارة للحماية
       const tradingSignal: TradingSignal = {
         symbol: symbol,
@@ -438,17 +470,24 @@ export async function POST(request: NextRequest) {
         confidence: parseFloat(signalData.confidence)
       };
 
-      // إعداد سياق السوق
+      // إعداد سياق السوق مع البيانات الحقيقية
       const marketContext: MarketContext = {
         ibConnected: ibService.isConnected(),
-        accountBalance: 100000, // TODO: جلب من IB
-        dailyPnL: 0, // TODO: جلب من قاعدة البيانات
-        maxDailyLoss: DEFAULT_RISK_SETTINGS.maxDailyLoss,
-        openPositions: 0, // TODO: جلب من قاعدة البيانات
-        maxOpenPositions: DEFAULT_RISK_SETTINGS.maxOpenPositions,
+        accountBalance: realMarketContext.accountBalance,
+        dailyPnL: realMarketContext.dailyPnL,
+        maxDailyLoss: realMarketContext.maxDailyLoss,
+        openPositions: realMarketContext.openPositions,
+        maxOpenPositions: realMarketContext.maxOpenPositions,
         currentPrice: parseFloat(signalData.price),
-        // TODO: إضافة بيانات EMA و ATR من مصدر حقيقي
+        ema20: realMarketContext.ema20,
+        ema50: realMarketContext.ema50,
+        ema200: realMarketContext.ema200,
+        atr: realMarketContext.atr
       };
+      
+      console.log(`💰 [WEBHOOK] Account Balance: $${marketContext.accountBalance.toFixed(2)}`);
+      console.log(`📊 [WEBHOOK] Daily P&L: $${marketContext.dailyPnL.toFixed(2)}`);
+      console.log(`📈 [WEBHOOK] Open Positions: ${marketContext.openPositions}/${marketContext.maxOpenPositions}`);
 
       // ═════════════════════════════════════════════════════════════════════════
       // 🛡️ تنفيذ جميع فحوصات الحماية
@@ -474,6 +513,14 @@ export async function POST(request: NextRequest) {
             responseMessage: `Protected: ${protectionResult.reason}`
           }
         });
+
+        // إرسال إشعار رفض الصفقة
+        telegramService.notifyTradeRejected({
+          symbol,
+          action,
+          reason: protectionResult.reason || 'Unknown',
+          mode: MODE
+        }).catch(err => console.error('[TELEGRAM] Rejection notification error:', err));
 
         return NextResponse.json({
           success: false,
@@ -537,6 +584,21 @@ export async function POST(request: NextRequest) {
           
           console.log(`✅ [WEBHOOK] Trade created in DB: ${tradeId}`);
           console.log(`💰 Risk: $${riskAmount?.toFixed(2)} (${DEFAULT_RISK_SETTINGS.riskPerTrade}% of account)`);
+
+          // ═════════════════════════════════════════════════════════════════════════
+          // 📱 إرسال إشعار تيليجرام
+          // ═════════════════════════════════════════════════════════════════════════
+          telegramService.notifyTradeOpened({
+            symbol,
+            action,
+            quantity,
+            price: parseFloat(signalData.price) || 0,
+            stopLoss: calculatedSL || undefined,
+            takeProfit: calculatedTP1 || undefined,
+            strategy: signalData.strategy,
+            mode: MODE,
+            ibOrderId
+          }).catch(err => console.error('[TELEGRAM] Notification error:', err));
         } catch (dbError) {
           console.error('❌ [WEBHOOK] Failed to create trade record:', dbError);
         }
