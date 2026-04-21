@@ -1,36 +1,179 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import crypto from 'crypto';
+import { 
+  MODE, 
+  canTrade, 
+  getCurrentModeConfig,
+  validateTradeParams 
+} from '@/config/trading-mode';
+import { ibService, IBContract, IBOrder } from '@/lib/ib-service';
 
-// التحقق من صحة الإشارة
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔐 التحقق من صحة الإشارة - SIGNAL VALIDATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
 function validateSignal(data: any): { valid: boolean; error?: string } {
   // التحقق من الحقول المطلوبة
   if (!data.symbol) {
-    return { valid: false, error: 'الرمز (symbol) مطلوب' };
+    return { valid: false, error: '❌ الرمز (symbol) مطلوب' };
   }
 
   if (!data.action) {
-    return { valid: false, error: 'الإجراء (action) مطلوب' };
+    return { valid: false, error: '❌ الإجراء (action) مطلوب' };
   }
 
   // التحقق من صحة الإجراء
   const validActions = ['BUY', 'SELL', 'CLOSE', 'EXIT', 'LONG', 'SHORT', 'CALL', 'PUT'];
   const action = data.action.toUpperCase();
   if (!validActions.includes(action)) {
-    return { valid: false, error: `إجراء غير صالح: ${action}. الإجراءات المسموحة: ${validActions.join(', ')}` };
+    return { valid: false, error: `❌ إجراء غير صالح: ${action}. الإجراءات المسموحة: ${validActions.join(', ')}` };
   }
 
-  // التحقق من السعر إذا كان موجوداً
-  if (data.price !== undefined && isNaN(parseFloat(data.price))) {
-    return { valid: false, error: 'السعر يجب أن يكون رقماً' };
+  // التحقق من السعر (مهم جداً للتداول الحقيقي)
+  if (data.price !== undefined) {
+    const price = parseFloat(data.price);
+    if (isNaN(price) || price <= 0) {
+      return { valid: false, error: '❌ السعر يجب أن يكون رقماً موجباً' };
+    }
   }
 
-  // التحقق من الكمية إذا كانت موجودة
-  if (data.quantity !== undefined && isNaN(parseInt(data.quantity))) {
-    return { valid: false, error: 'الكمية يجب أن تكون رقماً' };
+  // التحقق من الكمية
+  if (data.quantity !== undefined) {
+    const quantity = parseInt(data.quantity);
+    if (isNaN(quantity) || quantity <= 0) {
+      return { valid: false, error: '❌ الكمية يجب أن تكون رقماً موجباً' };
+    }
   }
 
   return { valid: true };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 📊 إنشاء عقد IB - CONTRACT CREATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function createIBContract(signal: any): IBContract {
+  const symbol = signal.symbol.toUpperCase();
+  
+  // تحديد نوع الأداة
+  const secType = signal.secType || signal.instrument_type || 'STK';
+  
+  // العقد الأساسي
+  const contract: IBContract = {
+    symbol: symbol,
+    secType: secType as any,
+    exchange: signal.exchange || 'SMART',
+    currency: signal.currency || 'USD'
+  };
+  
+  // إضافة تفاصيل الخيارات
+  if (secType === 'OPT' || signal.option_type) {
+    contract.secType = 'OPT';
+    contract.exchange = signal.exchange || 'CBOE';
+    contract.strike = parseFloat(signal.strike) || 0;
+    contract.right = signal.option_type?.toUpperCase() === 'PUT' ? 'P' : 'C';
+    contract.expiry = signal.expiry || signal.expiration || '';
+    contract.multiplier = signal.multiplier || '100';
+  }
+  
+  return contract;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 📈 تنفيذ الأمر عبر IB - ORDER EXECUTION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function executeIBOrder(
+  signal: any, 
+  quantity: number,
+  signalLogId: string
+): Promise<{ success: boolean; orderId?: number; error?: string }> {
+  const modeConfig = getCurrentModeConfig();
+  
+  console.log(`${modeConfig.emoji} [WEBHOOK] Attempting to execute order...`);
+  console.log(`📋 Mode: ${MODE}`);
+  console.log(`📊 Signal: ${signal.action} ${signal.symbol} x${quantity}`);
+  
+  // التحقق من وضع التداول
+  const tradeCheck = canTrade({
+    ibConnected: ibService.isConnected(),
+    hasMarketData: true
+  });
+  
+  if (!tradeCheck.allowed) {
+    console.error(`❌ [WEBHOOK] Trade not allowed: ${tradeCheck.reason}`);
+    return { success: false, error: tradeCheck.reason };
+  }
+  
+  // التحقق من اتصال IB
+  if (!ibService.isConnected()) {
+    console.error('❌ [WEBHOOK] IB not connected');
+    return { success: false, error: '❌ IB not connected - cannot execute order' };
+  }
+  
+  // إنشاء العقد
+  const contract = createIBContract(signal);
+  
+  // تحديد الاتجاه
+  const action = signal.action.toUpperCase();
+  const ibAction: 'BUY' | 'SELL' = ['BUY', 'LONG', 'CALL'].includes(action) ? 'BUY' : 'SELL';
+  
+  // إنشاء الأمر
+  const order: IBOrder = {
+    symbol: signal.symbol.toUpperCase(),
+    action: ibAction,
+    quantity: quantity,
+    orderType: signal.order_type || 'MKT',
+    tif: signal.tif || 'DAY'
+  };
+  
+  // إضافة سعر الحد إذا كان أمر محدد
+  if (order.orderType === 'LMT' && signal.limit_price) {
+    order.limitPrice = parseFloat(signal.limit_price);
+  }
+  
+  // إضافة سعر الوقف إذا كان أمر وقف
+  if (order.orderType === 'STP' && signal.stop_price) {
+    order.stopPrice = parseFloat(signal.stop_price);
+  }
+  
+  try {
+    console.log(`📤 [WEBHOOK] Placing IB order:`, { order, contract });
+    
+    const result = await ibService.placeOrder(order, contract);
+    
+    if (result.success) {
+      console.log(`✅ [WEBHOOK] Order placed successfully! Order ID: ${result.orderId}`);
+      
+      // تحديث سجل الإشارة
+      await db.signalLog.update({
+        where: { id: signalLogId },
+        data: {
+          status: 'EXECUTED',
+          executed: true,
+          executedAt: new Date()
+        }
+      });
+      
+      return { success: true, orderId: result.orderId };
+    } else {
+      console.error(`❌ [WEBHOOK] Order failed:`, result.message);
+      
+      await db.signalLog.update({
+        where: { id: signalLogId },
+        data: {
+          status: 'FAILED',
+          errorMessage: result.message
+        }
+      });
+      
+      return { success: false, error: result.message };
+    }
+  } catch (error: any) {
+    console.error('❌ [WEBHOOK] Order execution error:', error);
+    return { success: false, error: error.message };
+  }
 }
 
 // تحديد اتجاه الصفقة
@@ -218,55 +361,100 @@ export async function POST(request: NextRequest) {
 
     let executed = false;
     let tradeId = null;
+    let ibOrderId = null;
+    const modeConfig = getCurrentModeConfig();
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // 📊 LOGGING - تسجيل مفصل
+    // ═══════════════════════════════════════════════════════════════════════════════
+    console.log('═══════════════════════════════════════════════════════════════════');
+    console.log(`${modeConfig.emoji} 📩 TRADINGVIEW SIGNAL RECEIVED`);
+    console.log('═══════════════════════════════════════════════════════════════════');
+    console.log(`📍 Symbol: ${symbol}`);
+    console.log(`📍 Action: ${action}`);
+    console.log(`📍 Direction: ${direction}`);
+    console.log(`📍 Price: ${signalData.price || 'N/A'}`);
+    console.log(`📍 Strategy: ${signalData.strategy || 'N/A'}`);
+    console.log(`📍 Timeframe: ${signalData.timeframe || 'N/A'}`);
+    console.log(`📍 Mode: ${MODE}`);
+    console.log(`📍 IB Connected: ${ibService.isConnected()}`);
+    console.log('═══════════════════════════════════════════════════════════════════');
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // 🔒 MODE CHECK - التحقق من وضع التداول
+    // ═══════════════════════════════════════════════════════════════════════════════
+    
+    if (MODE === 'SIMULATION') {
+      console.log('⚠️ [SIMULATION] Order would be executed (simulation only)');
+      
+      await db.signalLog.update({
+        where: { id: signalLog.id },
+        data: {
+          status: 'VALIDATED',
+          responseMessage: 'Simulation mode - order not sent to IB'
+        }
+      });
+      
+      return NextResponse.json({
+        success: true,
+        simulation: true,
+        data: {
+          webhookId,
+          signalId: signalLog.id,
+          symbol,
+          action,
+          direction,
+          mode: MODE,
+          message: '✅ Signal validated (SIMULATION mode - no real execution)'
+        }
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // 📈 IB EXECUTION - تنفيذ عبر Interactive Brokers
+    // ═══════════════════════════════════════════════════════════════════════════════
 
     // إذا كان التداول التلقائي مفعل لهذا الرمز
     if (watchlistItem) {
-      try {
-        // إنشاء صفقة جديدة
-        const trade = await db.trade.create({
-          data: {
-            symbol,
-            instrumentType: watchlistItem.type,
-            direction,
-            quantity: watchlistItem.quantity || 1,
-            entryPrice: parseFloat(signalData.price) || 0,
-            strike: watchlistItem.strike,
-            expiry: watchlistItem.expiry,
-            optionType: watchlistItem.optionType,
-            stopLoss: watchlistItem.stopLossPercent ?
-              (parseFloat(signalData.price) * (1 - watchlistItem.stopLossPercent / 100)) : null,
-            takeProfit: watchlistItem.takeProfitPercent ?
-              (parseFloat(signalData.price) * (1 + watchlistItem.takeProfitPercent / 100)) : null,
-            status: 'PENDING',
-            signalSource: 'TRADINGVIEW',
-            signalStrategy: signalData.strategy,
-            signalTime: new Date()
-          }
-        });
+      const quantity = watchlistItem.quantity || parseInt(signalData.quantity) || 1;
+      
+      // محاولة التنفيذ عبر IB
+      const execResult = await executeIBOrder(signalData, quantity, signalLog.id);
+      
+      if (execResult.success) {
+        ibOrderId = execResult.orderId;
+        
+        // إنشاء سجل الصفقة في قاعدة البيانات
+        try {
+          const trade = await db.trade.create({
+            data: {
+              symbol,
+              instrumentType: watchlistItem.type,
+              direction,
+              quantity: quantity,
+              entryPrice: parseFloat(signalData.price) || 0,
+              strike: watchlistItem.strike,
+              expiry: watchlistItem.expiry,
+              optionType: watchlistItem.optionType,
+              stopLoss: watchlistItem.stopLossPercent ?
+                (parseFloat(signalData.price) * (1 - watchlistItem.stopLossPercent / 100)) : null,
+              takeProfit: watchlistItem.takeProfitPercent ?
+                (parseFloat(signalData.price) * (1 + watchlistItem.takeProfitPercent / 100)) : null,
+              status: 'PENDING',
+              ibOrderId: ibOrderId,
+              signalSource: 'TRADINGVIEW',
+              signalStrategy: signalData.strategy,
+              signalTime: new Date()
+            }
+          });
 
-        tradeId = trade.id;
-        executed = true;
-
-        // تحديث حالة الإشارة
-        await db.signalLog.update({
-          where: { id: signalLog.id },
-          data: {
-            status: 'EXECUTED',
-            executed: true,
-            executedAt: new Date(),
-            tradeId
-          }
-        });
-      } catch (execError) {
-        console.error('Error executing trade:', execError);
-
-        await db.signalLog.update({
-          where: { id: signalLog.id },
-          data: {
-            status: 'FAILED',
-            errorMessage: 'فشل في تنفيذ الصفقة: ' + (execError as Error).message
-          }
-        });
+          tradeId = trade.id;
+          executed = true;
+          
+          console.log(`✅ [WEBHOOK] Trade created in DB: ${tradeId}`);
+        } catch (dbError) {
+          console.error('❌ [WEBHOOK] Failed to create trade record:', dbError);
+        }
       }
     } else {
       // تحديث حالة الإشارة إلى تم التحقق
@@ -290,11 +478,16 @@ export async function POST(request: NextRequest) {
         direction,
         executed,
         tradeId,
+        ibOrderId,
+        mode: MODE,
+        ibConnected: ibService.isConnected(),
         processingTime: `${processingTime}ms`
       },
       message: executed ?
-        `تم تنفيذ الإشارة تلقائياً: ${action} ${symbol}` :
-        `تم استلام الإشارة: ${action} ${symbol}`
+        `✅ تم تنفيذ الإشارة تلقائياً: ${action} ${symbol} (IB Order: ${ibOrderId})` :
+        watchlistItem ? 
+          `❌ فشل تنفيذ الإشارة - تحقق من اتصال IB` :
+          `📩 تم استلام الإشارة: ${action} ${symbol} (التداول التلقائي غير مفعل لهذا الرمز)`
     });
 
   } catch (error) {
@@ -313,25 +506,49 @@ export async function POST(request: NextRequest) {
 
 // GET - معلومات الـ Webhook
 export async function GET(request: NextRequest) {
+  const modeConfig = getCurrentModeConfig();
+  
   return NextResponse.json({
     success: true,
     info: {
       name: 'Trading Bot Webhook',
-      version: '2.0',
+      version: '3.0',
+      description: 'TradingView Webhook → IB Order Execution',
+      
+      // Mode Info
+      mode: MODE,
+      modeDescription: modeConfig.description,
+      allowRealTrades: modeConfig.allowRealTrades,
+      
+      // IB Status
+      ibConnected: ibService.isConnected(),
+      
       endpoints: {
         webhook: '/api/tradingview/webhook',
         signals: '/api/signals',
         watchlist: '/api/watchlist'
       },
+      
       supportedActions: ['BUY', 'SELL', 'CLOSE', 'EXIT', 'LONG', 'SHORT', 'CALL', 'PUT'],
+      
+      // Example payload for TradingView
       payloadExample: {
-        symbol: 'AAPL',
+        secret: 'YOUR_WEBHOOK_SECRET',
+        symbol: 'SPX',
         action: 'BUY',
-        price: 150.50,
-        quantity: 100,
-        stop_loss: 145,
-        take_profit: 160,
-        secret: 'YOUR_WEBHOOK_SECRET'
+        price: '{{close}}',
+        quantity: 1,
+        timeframe: '1m',
+        strategy: 'whale_radar',
+        stop_loss: 0,
+        take_profit: 0
+      },
+      
+      // Security
+      security: {
+        secretRequired: true,
+        ipWhitelist: true,
+        autoTradeRequired: true
       }
     }
   });
