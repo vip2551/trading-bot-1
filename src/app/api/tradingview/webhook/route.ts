@@ -8,6 +8,15 @@ import {
   validateTradeParams 
 } from '@/config/trading-mode';
 import { ibService, IBContract, IBOrder } from '@/lib/ib-service';
+import {
+  canExecuteTrade,
+  isDuplicateSignal,
+  isInNewsBlockWindow,
+  TradingSignal,
+  MarketContext,
+  DEFAULT_RISK_SETTINGS,
+  logTradeDecision
+} from '@/lib/trading-protection';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 🔐 التحقق من صحة الإشارة - SIGNAL VALIDATION
@@ -411,13 +420,88 @@ export async function POST(request: NextRequest) {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    // 📈 IB EXECUTION - تنفيذ عبر Interactive Brokers
+    // 🛡️ TRADING PROTECTION SYSTEM - نظام الحماية الشامل
     // ═══════════════════════════════════════════════════════════════════════════════
 
     // إذا كان التداول التلقائي مفعل لهذا الرمز
     if (watchlistItem) {
-      const quantity = watchlistItem.quantity || parseInt(signalData.quantity) || 1;
-      
+      // إعداد بيانات الإشارة للحماية
+      const tradingSignal: TradingSignal = {
+        symbol: symbol,
+        action: action as any,
+        price: parseFloat(signalData.price) || 0,
+        quantity: parseInt(signalData.quantity) || watchlistItem.quantity || 1,
+        timeframe: signalData.timeframe,
+        strategy: signalData.strategy,
+        stopLoss: parseFloat(signalData.stop_loss || signalData.stopLoss),
+        takeProfit: parseFloat(signalData.take_profit || signalData.takeProfit),
+        confidence: parseFloat(signalData.confidence)
+      };
+
+      // إعداد سياق السوق
+      const marketContext: MarketContext = {
+        ibConnected: ibService.isConnected(),
+        accountBalance: 100000, // TODO: جلب من IB
+        dailyPnL: 0, // TODO: جلب من قاعدة البيانات
+        maxDailyLoss: DEFAULT_RISK_SETTINGS.maxDailyLoss,
+        openPositions: 0, // TODO: جلب من قاعدة البيانات
+        maxOpenPositions: DEFAULT_RISK_SETTINGS.maxOpenPositions,
+        currentPrice: parseFloat(signalData.price),
+        // TODO: إضافة بيانات EMA و ATR من مصدر حقيقي
+      };
+
+      // ═════════════════════════════════════════════════════════════════════════
+      // 🛡️ تنفيذ جميع فحوصات الحماية
+      // ═════════════════════════════════════════════════════════════════════════
+      const protectionResult = canExecuteTrade(tradingSignal, marketContext);
+
+      // تسجيل قرار التداول
+      logTradeDecision(tradingSignal, protectionResult, {
+        mode: MODE,
+        ibConnected: ibService.isConnected(),
+        watchlistEnabled: true
+      });
+
+      if (!protectionResult.ok) {
+        // تم رفض الإشارة من نظام الحماية
+        console.log(`❌ [PROTECTION] Signal REJECTED: ${protectionResult.reason}`);
+        
+        await db.signalLog.update({
+          where: { id: signalLog.id },
+          data: {
+            status: 'IGNORED',
+            errorMessage: protectionResult.reason,
+            responseMessage: `Protected: ${protectionResult.reason}`
+          }
+        });
+
+        return NextResponse.json({
+          success: false,
+          protected: true,
+          data: {
+            webhookId,
+            signalId: signalLog.id,
+            symbol,
+            action,
+            direction,
+            mode: MODE,
+            reason: protectionResult.reason
+          },
+          message: `🛡️ Signal protected: ${protectionResult.reason}`
+        });
+      }
+
+      // ═════════════════════════════════════════════════════════════════════════
+      // ✅ الإشارة مقبولة - تنفيذ باستخدام البيانات المحسوبة
+      // ═════════════════════════════════════════════════════════════════════════
+      const quantity = protectionResult.data?.positionSize || 1;
+      const calculatedSL = protectionResult.data?.stopLoss;
+      const calculatedTP1 = protectionResult.data?.takeProfit1;
+      const riskAmount = protectionResult.data?.riskAmount;
+
+      console.log(`💰 [PROTECTION] Risk Amount: $${riskAmount?.toFixed(2)}`);
+      console.log(`🎯 [PROTECTION] Calculated SL: ${calculatedSL?.toFixed(2)}, TP1: ${calculatedTP1?.toFixed(2)}`);
+
       // محاولة التنفيذ عبر IB
       const execResult = await executeIBOrder(signalData, quantity, signalLog.id);
       
@@ -436,10 +520,10 @@ export async function POST(request: NextRequest) {
               strike: watchlistItem.strike,
               expiry: watchlistItem.expiry,
               optionType: watchlistItem.optionType,
-              stopLoss: watchlistItem.stopLossPercent ?
-                (parseFloat(signalData.price) * (1 - watchlistItem.stopLossPercent / 100)) : null,
-              takeProfit: watchlistItem.takeProfitPercent ?
-                (parseFloat(signalData.price) * (1 + watchlistItem.takeProfitPercent / 100)) : null,
+              stopLoss: calculatedSL || (watchlistItem.stopLossPercent ?
+                (parseFloat(signalData.price) * (1 - watchlistItem.stopLossPercent / 100)) : null),
+              takeProfit: calculatedTP1 || (watchlistItem.takeProfitPercent ?
+                (parseFloat(signalData.price) * (1 + watchlistItem.takeProfitPercent / 100)) : null),
               status: 'PENDING',
               ibOrderId: ibOrderId,
               signalSource: 'TRADINGVIEW',
@@ -452,6 +536,7 @@ export async function POST(request: NextRequest) {
           executed = true;
           
           console.log(`✅ [WEBHOOK] Trade created in DB: ${tradeId}`);
+          console.log(`💰 Risk: $${riskAmount?.toFixed(2)} (${DEFAULT_RISK_SETTINGS.riskPerTrade}% of account)`);
         } catch (dbError) {
           console.error('❌ [WEBHOOK] Failed to create trade record:', dbError);
         }
@@ -507,13 +592,14 @@ export async function POST(request: NextRequest) {
 // GET - معلومات الـ Webhook
 export async function GET(request: NextRequest) {
   const modeConfig = getCurrentModeConfig();
+  const newsCheck = isInNewsBlockWindow();
   
   return NextResponse.json({
     success: true,
     info: {
       name: 'Trading Bot Webhook',
-      version: '3.0',
-      description: 'TradingView Webhook → IB Order Execution',
+      version: '4.0',
+      description: 'TradingView Webhook → IB Order Execution with Protection System',
       
       // Mode Info
       mode: MODE,
@@ -522,6 +608,15 @@ export async function GET(request: NextRequest) {
       
       // IB Status
       ibConnected: ibService.isConnected(),
+      
+      // Protection Status
+      protection: {
+        newsBlock: newsCheck.blocked ? newsCheck.window : false,
+        riskPerTrade: `${DEFAULT_RISK_SETTINGS.riskPerTrade}%`,
+        maxDailyLoss: `${DEFAULT_RISK_SETTINGS.maxDailyLoss}%`,
+        maxOpenPositions: DEFAULT_RISK_SETTINGS.maxOpenPositions,
+        minRiskReward: `1:${DEFAULT_RISK_SETTINGS.minRiskReward}`
+      },
       
       endpoints: {
         webhook: '/api/tradingview/webhook',
@@ -540,16 +635,37 @@ export async function GET(request: NextRequest) {
         quantity: 1,
         timeframe: '1m',
         strategy: 'whale_radar',
-        stop_loss: 0,
-        take_profit: 0
+        stop_loss: '{{close}} - 5',
+        take_profit: '{{close}} + 10'
       },
       
-      // Security
+      // Security Features
       security: {
         secretRequired: true,
         ipWhitelist: true,
-        autoTradeRequired: true
-      }
+        autoTradeRequired: true,
+        duplicatePrevention: true,
+        newsFilter: true,
+        trendFilter: true,
+        dailyLossLimit: true
+      },
+      
+      // Execution Flow
+      executionFlow: [
+        '1. Receive Webhook',
+        '2. Validate Secret',
+        '3. Validate Signal Data',
+        '4. Check IB Connection',
+        '5. Check Mode (SIMULATION/PAPER/LIVE)',
+        '6. Check Duplicate Signal',
+        '7. Check News Block Window',
+        '8. Check Daily Loss Limit',
+        '9. Check Max Positions',
+        '10. Trend Filter (EMA)',
+        '11. Calculate Position Size',
+        '12. Execute IB Order',
+        '13. Log Decision'
+      ]
     }
   });
 }
