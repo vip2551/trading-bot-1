@@ -2,7 +2,39 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { setInterval } from 'timers';
 
-const PORT = 3004;
+// ═══════════════════════════════════════════════════════════════════════════════
+// 📡 REAL-TIME SERVICE - Safe Market Data Broadcasting
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const PORT = 3006; // Changed from 3004 to avoid conflict with trade-monitor
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🎯 TRADING MODE CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type TradingMode = 'SIMULATION' | 'PAPER' | 'LIVE';
+
+const MODE: TradingMode = (process.env.TRADING_MODE as TradingMode) || 'PAPER';
+
+const MODE_CONFIG = {
+  SIMULATION: {
+    name: 'Simulation',
+    emoji: '🧪',
+    allowFakeData: true,
+  },
+  PAPER: {
+    name: 'Paper Trading',
+    emoji: '📝',
+    allowFakeData: false,
+  },
+  LIVE: {
+    name: 'Live Trading',
+    emoji: '🔴',
+    allowFakeData: false,
+  },
+} as const;
+
+const getCurrentModeConfig = () => MODE_CONFIG[MODE];
 
 const httpServer = createServer();
 const io = new Server(httpServer, {
@@ -19,10 +51,10 @@ const clients = new Map<string, {
   lastPing: number;
 }>();
 
-// Market data simulation (in production, this would come from IB)
+// Market data state
 let marketData = {
-  spx: { price: 5800, bid: 5799.5, ask: 5800.5, volume: 1000000, lastUpdate: new Date() },
-  vix: { price: 15.5, bid: 15.4, ask: 15.6, volume: 500000, lastUpdate: new Date() },
+  spx: { price: 0, bid: 0, ask: 0, volume: 0, lastUpdate: new Date(), isReal: false },
+  vix: { price: 0, bid: 0, ask: 0, volume: 0, lastUpdate: new Date(), isReal: false },
 };
 
 // Active alerts
@@ -43,8 +75,67 @@ let healthStatus = {
   server: { uptime: Date.now(), memory: process.memoryUsage().heapUsed },
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 📊 REAL MARKET DATA FETCHING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function fetchRealMarketData(): Promise<void> {
+  const modeConfig = getCurrentModeConfig();
+  
+  try {
+    // Try to fetch from price API
+    const res = await fetch('http://localhost:3000/api/price?symbol=SPX', {
+      signal: AbortSignal.timeout(3000)
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      if (data.price && data.simulated !== true) {
+        marketData.spx = {
+          price: data.price,
+          bid: data.price - 0.5,
+          ask: data.price + 0.5,
+          volume: data.volume || 0,
+          lastUpdate: new Date(),
+          isReal: true,
+        };
+        return;
+      }
+    }
+  } catch {
+    // Price API not available
+  }
+  
+  // In non-simulation mode, mark data as not real
+  if (!modeConfig.allowFakeData) {
+    console.warn('⚠️ لا توجد بيانات حقيقية - لن يتم تحديث الأسعار');
+    return;
+  }
+  
+  // Only in SIMULATION mode, simulate data
+  console.log('🧪 [SIMULATION] محاكاة بيانات السوق');
+  marketData.spx = {
+    price: 5800 + (Math.random() - 0.5) * 20,
+    bid: 5799.5,
+    ask: 5800.5,
+    volume: 1000000,
+    lastUpdate: new Date(),
+    isReal: false,
+  };
+  
+  marketData.vix = {
+    price: 15 + (Math.random() - 0.5) * 2,
+    bid: 15.4,
+    ask: 15.6,
+    volume: 500000,
+    lastUpdate: new Date(),
+    isReal: false,
+  };
+}
+
 // Connection handler
 io.on('connection', (socket) => {
+  const modeConfig = getCurrentModeConfig();
   console.log(`[WS] Client connected: ${socket.id}`);
   
   clients.set(socket.id, {
@@ -56,6 +147,7 @@ io.on('connection', (socket) => {
   socket.emit('connected', { 
     id: socket.id, 
     timestamp: new Date(),
+    mode: MODE,
     marketData,
     health: healthStatus,
   });
@@ -147,26 +239,17 @@ io.on('connection', (socket) => {
   });
 });
 
-// Simulate market data updates
-setInterval(() => {
-  // Update SPX price with small random changes
-  const change = (Math.random() - 0.5) * 2;
-  marketData.spx.price = Math.round((marketData.spx.price + change) * 100) / 100;
-  marketData.spx.bid = marketData.spx.price - 0.5;
-  marketData.spx.ask = marketData.spx.price + 0.5;
-  marketData.spx.lastUpdate = new Date();
-
-  // Update VIX
-  const vixChange = (Math.random() - 0.5) * 0.2;
-  marketData.vix.price = Math.round((marketData.vix.price + vixChange) * 100) / 100;
-  marketData.vix.bid = marketData.vix.price - 0.1;
-  marketData.vix.ask = marketData.vix.price + 0.1;
-  marketData.vix.lastUpdate = new Date();
-
+// Market data update loop
+setInterval(async () => {
+  await fetchRealMarketData();
+  
   // Broadcast to all clients subscribed to market data
   clients.forEach((client, socketId) => {
     if (client.subscriptions.has('market') || client.subscriptions.has('all')) {
-      io.to(socketId).emit('market-data', marketData);
+      io.to(socketId).emit('market-data', {
+        ...marketData,
+        mode: MODE,
+      });
     }
   });
 
@@ -175,6 +258,10 @@ setInterval(() => {
     if (alert.triggered) return;
 
     const currentPrice = alert.symbol === 'SPX' ? marketData.spx.price : marketData.vix.price;
+    
+    // Only check alerts if we have real data
+    if (currentPrice <= 0) return;
+    
     let triggered = false;
 
     if (alert.condition === 'ABOVE' && currentPrice >= alert.targetPrice) {
@@ -211,7 +298,21 @@ setInterval(() => {
   io.emit('health-status', healthStatus);
 }, 5000);
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔄 START SERVICE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const modeConfig = getCurrentModeConfig();
+
+console.log('╔════════════════════════════════════════════════════════════╗');
+console.log('║       📡 REAL-TIME SERVICE - SAFE MODE                    ║');
+console.log('╠════════════════════════════════════════════════════════════╣');
+console.log(`║ ${modeConfig.emoji} Mode: ${modeConfig.name.padEnd(48)}║`);
+console.log(`║ 📡 Port: ${PORT}                                               ║`);
+console.log(`║ 🔒 Allow Fake Data: ${String(modeConfig.allowFakeData).padEnd(32)}║`);
+console.log('╚════════════════════════════════════════════════════════════╝');
+
 // Start server
 httpServer.listen(PORT, () => {
-  console.log(`[WS] Real-time service running on port ${PORT}`);
+  console.log(`✅ Real-time service running safely on port ${PORT}`);
 });

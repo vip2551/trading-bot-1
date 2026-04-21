@@ -1,7 +1,69 @@
 import { serve } from "bun";
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 📊 TRADE MONITOR SERVICE - Safe Price Monitoring
+// ═══════════════════════════════════════════════════════════════════════════════
+
 const TELEGRAM_UPDATE_INTERVAL = 60000; // 1 minute
 const TRADE_CHECK_INTERVAL = 5000; // 5 seconds
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🎯 TRADING MODE CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type TradingMode = 'SIMULATION' | 'PAPER' | 'LIVE';
+
+const MODE: TradingMode = (process.env.TRADING_MODE as TradingMode) || 'PAPER';
+
+const MODE_CONFIG = {
+  SIMULATION: {
+    name: 'Simulation',
+    emoji: '🧪',
+    allowFakeData: true,
+  },
+  PAPER: {
+    name: 'Paper Trading',
+    emoji: '📝',
+    allowFakeData: false,
+  },
+  LIVE: {
+    name: 'Live Trading',
+    emoji: '🔴',
+    allowFakeData: false,
+  },
+} as const;
+
+const getCurrentModeConfig = () => MODE_CONFIG[MODE];
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔒 SAFETY VALIDATORS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Validate price data - Returns true ONLY if data is valid and real
+ */
+function validatePriceData(data: unknown): data is { price: number; isReal: boolean } {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+
+  const d = data as Record<string, unknown>;
+
+  // Check price is valid
+  if (typeof d.price !== 'number' || isNaN(d.price) || d.price <= 0) {
+    return false;
+  }
+
+  // In non-simulation modes, verify data is real
+  if (!getCurrentModeConfig().allowFakeData) {
+    // Data must be explicitly marked as real
+    if (d.isReal !== true) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 // In-memory state
 const tradePrices = new Map<string, { price: number; lastUpdate: number }>();
@@ -56,8 +118,10 @@ async function sendTelegram(message: string, settings: any): Promise<boolean> {
   }
 }
 
-// Get current price (only from real sources)
+// Get current price (ONLY from real sources)
 async function getCurrentPrice(trade: any): Promise<{ optionPrice: number; stockPrice: number; isReal: boolean } | null> {
+  const modeConfig = getCurrentModeConfig();
+  
   // Try to get real price from IB service
   try {
     const res = await fetch('http://localhost:3003/market/spx', {
@@ -65,7 +129,7 @@ async function getCurrentPrice(trade: any): Promise<{ optionPrice: number; stock
     });
     if (res.ok) {
       const data = await res.json();
-      if (data.price) {
+      if (data.price && data.simulated !== true) {
         // Estimate option price based on spot movement
         const spotChange = data.price - 5800; // Assume 5800 as base
         const optionDelta = trade.optionType === 'CALL' ? 0.5 : -0.5;
@@ -89,7 +153,7 @@ async function getCurrentPrice(trade: any): Promise<{ optionPrice: number; stock
     if (res.ok) {
       const data = await res.json();
       const stockPrice = data.price || data.spotPrice;
-      if (stockPrice) {
+      if (stockPrice && data.simulated !== true) {
         // Estimate option price
         const baseOptionPrice = trade.entryPrice || 350;
         const change = data.change || 0;
@@ -104,10 +168,19 @@ async function getCurrentPrice(trade: any): Promise<{ optionPrice: number; stock
     // Price API not available
   }
 
-  // ⚠️ CRITICAL: Do NOT simulate prices for real trades
-  // Return null to indicate no real data available
-  console.error(`🚫 لا توجد بيانات حقيقية لـ ${trade.symbol} - لا يمكن مراقبة الصفقة`);
-  return null;
+  // 🚫 CRITICAL: In non-simulation mode, do NOT return fake prices
+  if (!modeConfig.allowFakeData) {
+    console.error(`🚫 لا توجد بيانات حقيقية لـ ${trade.symbol} - لا يمكن مراقبة الصفقة`);
+    return null;
+  }
+  
+  // Only in SIMULATION mode
+  console.log(`🧪 [SIMULATION] استخدام بيانات محاكاة لـ ${trade.symbol}`);
+  return {
+    stockPrice: 5800 + (Math.random() - 0.5) * 20,
+    optionPrice: (trade.entryPrice || 350) * (1 + (Math.random() - 0.5) * 0.1),
+    isReal: false
+  };
 }
 
 // Calculate P&L
@@ -217,18 +290,21 @@ async function monitorTrades(): Promise<void> {
   }
 
   const trades = await getOpenTrades();
+  const modeConfig = getCurrentModeConfig();
   
   for (const trade of trades) {
     try {
       const priceData = await getCurrentPrice(trade);
       
-      // ⚠️ CRITICAL: Skip monitoring if no real price data
-      if (!priceData || !priceData.isReal) {
-        console.warn(`⚠️ تخطي مراقبة ${trade.symbol} - لا توجد بيانات حقيقية`);
-        continue;
+      // 🚫 CRITICAL: Skip monitoring if no valid real price data
+      if (!validatePriceData(priceData)) {
+        if (!modeConfig.allowFakeData) {
+          console.warn(`⚠️ تخطي مراقبة ${trade.symbol} - لا توجد بيانات حقيقية`);
+          continue;
+        }
       }
       
-      const { optionPrice, stockPrice } = priceData;
+      const { optionPrice, stockPrice } = priceData!;
       tradePrices.set(trade.id, { price: optionPrice, lastUpdate: Date.now() });
 
       // Send price update every minute
@@ -248,14 +324,10 @@ async function monitorTrades(): Promise<void> {
   }
 }
 
-// Start monitoring
-console.log('🔄 Starting trade monitor service...');
-setInterval(monitorTrades, TRADE_CHECK_INTERVAL);
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🚀 HTTP SERVER
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// Run immediately
-monitorTrades().catch(console.error);
-
-// HTTP Server
 serve({
   port: 3004,
   async fetch(req) {
@@ -277,13 +349,14 @@ serve({
       // Get trade prices
       if (path === '/prices' && req.method === 'GET') {
         const prices = Object.fromEntries(tradePrices);
-        return Response.json({ prices }, { headers: corsHeaders });
+        return Response.json({ prices, mode: MODE }, { headers: corsHeaders });
       }
 
       // Health check
       if (path === '/health') {
         return Response.json({ 
           status: 'ok', 
+          mode: MODE,
           trades: tradePrices.size,
           timestamp: new Date().toISOString()
         }, { headers: corsHeaders });
@@ -296,4 +369,24 @@ serve({
   },
 });
 
-console.log('✅ Trade monitor service running on port 3004');
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔄 START SERVICE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const modeConfig = getCurrentModeConfig();
+
+console.log('╔════════════════════════════════════════════════════════════╗');
+console.log('║       📊 TRADE MONITOR SERVICE - SAFE MODE                ║');
+console.log('╠════════════════════════════════════════════════════════════╣');
+console.log(`║ ${modeConfig.emoji} Mode: ${modeConfig.name.padEnd(48)}║`);
+console.log(`║ 📡 Port: 3004                                              ║`);
+console.log(`║ 🔒 Allow Fake Data: ${String(modeConfig.allowFakeData).padEnd(32)}║`);
+console.log('╚════════════════════════════════════════════════════════════╝');
+
+// Start monitoring
+setInterval(monitorTrades, TRADE_CHECK_INTERVAL);
+
+// Run immediately
+monitorTrades().catch(console.error);
+
+console.log('✅ Trade monitor service running safely');

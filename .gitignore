@@ -35,6 +35,18 @@ Thumbs.db
 *.temp
 .cache/
 
+# Backup files
+*.bak
+*.backup
+*~
+
+# Sensitive files
+.env.production
+secrets/
+credentials/
+*.pem
+*.key
+
 # Zip files
 *.zip
 *.tar.gz

@@ -1,11 +1,49 @@
 import express from 'express';
 import cors from 'cors';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🤖 IB SERVICE - Safe Trading Execution
+// ═══════════════════════════════════════════════════════════════════════════════
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = 3003;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🎯 TRADING MODE CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type TradingMode = 'SIMULATION' | 'PAPER' | 'LIVE';
+
+const MODE: TradingMode = (process.env.TRADING_MODE as TradingMode) || 'PAPER';
+
+const MODE_CONFIG = {
+  SIMULATION: {
+    name: 'Simulation',
+    emoji: '🧪',
+    allowRealTrades: false,
+    allowFakeData: true,
+    ibPort: 0, // No IB connection
+  },
+  PAPER: {
+    name: 'Paper Trading',
+    emoji: '📝',
+    allowRealTrades: true,
+    allowFakeData: false,
+    ibPort: 7497, // TWS Paper Trading
+  },
+  LIVE: {
+    name: 'Live Trading',
+    emoji: '🔴',
+    allowRealTrades: true,
+    allowFakeData: false,
+    ibPort: 7496, // TWS Live
+  },
+} as const;
+
+const getCurrentModeConfig = () => MODE_CONFIG[MODE];
 
 // Types
 interface Settings {
@@ -34,6 +72,7 @@ interface MarketData {
   askSize: number;
   volume: number;
   openInterest: number;
+  isReal: boolean;
 }
 
 interface TradeRequest {
@@ -60,9 +99,9 @@ interface TradeResult {
 let isConnected = false;
 let orderId = 1;
 let settings: Settings = {
-  accountType: 'PAPER',
+  accountType: MODE,
   ibHost: '127.0.0.1',
-  ibPort: 7497,
+  ibPort: getCurrentModeConfig().ibPort,
   ibClientId: 1,
   checkSpread: true,
   maxSpreadPercent: 5.0,
@@ -75,51 +114,109 @@ let settings: Settings = {
   retryAttempts: 3,
 };
 
-const ACCOUNT_PORTS = { SIMULATION: 0, PAPER: 7497, LIVE: 7496 };
 const simulatedPrices: Record<string, number> = { SPX: 5800, ES: 5800, GC: 2350, AAPL: 180, TSLA: 250 };
 const activeTrades = new Map<string, { orderId: number; symbol: string; direction: string; price: number; simulated: boolean }>();
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔒 SAFETY VALIDATORS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function validateTradeParams(params: TradeRequest): { valid: boolean; error?: string } {
+  if (!params.tradeId) {
+    return { valid: false, error: '❌ Missing trade ID' };
+  }
+  if (!params.symbol) {
+    return { valid: false, error: '❌ Missing symbol' };
+  }
+  if (!params.quantity || params.quantity <= 0) {
+    return { valid: false, error: '❌ Invalid quantity' };
+  }
+  if (!params.direction || !['CALL', 'PUT', 'BUY', 'SELL'].includes(params.direction)) {
+    return { valid: false, error: '❌ Invalid direction' };
+  }
+  return { valid: true };
+}
+
 // Connect to IB
 async function connectToIB(): Promise<boolean> {
-  if (settings.accountType === 'SIMULATION') {
-    console.log('🎭 Simulation mode - no IB connection');
+  const modeConfig = getCurrentModeConfig();
+  
+  if (MODE === 'SIMULATION') {
+    console.log('🧪 [SIMULATION] لا يوجد اتصال بـ IB');
     isConnected = true;
     return true;
   }
+  
   console.log(`📡 Connecting to IB at ${settings.ibHost}:${settings.ibPort}`);
-  // In production: actual IB connection here
+  console.log(`${modeConfig.emoji} Mode: ${modeConfig.name}`);
+  
+  // In production: actual IB connection here using @stoqey/ib
+  // For now, simulate connection for testing
   isConnected = true;
   return true;
 }
 
 async function disconnectFromIB(): Promise<void> {
   isConnected = false;
+  console.log('📡 Disconnected from IB');
 }
 
-// Get market data (simulated or from IB)
-async function getMarketData(symbol: string, strike?: number | null): Promise<MarketData> {
-  const basePrice = simulatedPrices[symbol] || 100;
-  const optionPremium = symbol === 'SPX' && strike ? basePrice * 0.01 : 0;
-  const midPrice = (basePrice * 0.01) + optionPremium + (Math.random() - 0.5) * 5;
+// Get market data
+async function getMarketData(symbol: string, strike?: number | null): Promise<MarketData | null> {
+  const modeConfig = getCurrentModeConfig();
   
-  // Simulate spread based on liquidity
-  const spreadPercent = settings.accountType === 'SIMULATION' ? 2 : 1;
-  const halfSpread = midPrice * (spreadPercent / 100);
+  // In SIMULATION mode, use simulated data
+  if (MODE === 'SIMULATION') {
+    const basePrice = simulatedPrices[symbol] || 100;
+    const optionPremium = symbol === 'SPX' && strike ? basePrice * 0.01 : 0;
+    const midPrice = (basePrice * 0.01) + optionPremium + (Math.random() - 0.5) * 5;
+    
+    const spreadPercent = 2;
+    const halfSpread = midPrice * (spreadPercent / 100);
+    
+    return {
+      bid: midPrice - halfSpread,
+      ask: midPrice + halfSpread,
+      last: midPrice,
+      bidSize: Math.floor(Math.random() * 500) + 100,
+      askSize: Math.floor(Math.random() * 500) + 100,
+      volume: Math.floor(Math.random() * 10000) + 1000,
+      openInterest: Math.floor(Math.random() * 50000) + 5000,
+      isReal: false,
+    };
+  }
   
-  return {
-    bid: midPrice - halfSpread,
-    ask: midPrice + halfSpread,
-    last: midPrice,
-    bidSize: Math.floor(Math.random() * 500) + 100,
-    askSize: Math.floor(Math.random() * 500) + 100,
-    volume: Math.floor(Math.random() * 10000) + 1000,
-    openInterest: Math.floor(Math.random() * 50000) + 5000,
-  };
+  // In PAPER/LIVE mode, get real data from IB
+  // TODO: Implement actual IB market data subscription
+  // For now, return null to indicate no real data
+  console.warn(`⚠️ [${modeConfig.name}] لا توجد بيانات حقيقية من IB لـ ${symbol}`);
+  return null;
 }
 
 // Verify spread and liquidity before trade
-async function verifySpreadAndLiquidity(symbol: string, quantity: number, marketData: MarketData): Promise<{ valid: boolean; warnings: string[]; spread: { value: number; percent: number }; liquidity: { available: number; required: number }; slippage: { estimated: number; percent: number } }> {
+async function verifySpreadAndLiquidity(symbol: string, quantity: number, marketData: MarketData | null): Promise<{ valid: boolean; warnings: string[]; spread: { value: number; percent: number }; liquidity: { available: number; required: number }; slippage: { estimated: number; percent: number } }> {
   const warnings: string[] = [];
+  
+  // If no market data, reject in non-simulation mode
+  if (!marketData) {
+    if (MODE !== 'SIMULATION') {
+      return {
+        valid: false,
+        warnings: ['❌ لا توجد بيانات سوق حقيقية'],
+        spread: { value: 0, percent: 0 },
+        liquidity: { available: 0, required: quantity },
+        slippage: { estimated: 0, percent: 0 },
+      };
+    }
+    // In simulation, allow without verification
+    return {
+      valid: true,
+      warnings: ['🧪 [SIMULATION] لا توجد بيانات للتحقق'],
+      spread: { value: 0, percent: 0 },
+      liquidity: { available: 1000, required: quantity },
+      slippage: { estimated: 0, percent: 0 },
+    };
+  }
   
   // Check spread
   const spreadValue = marketData.ask - marketData.bid;
@@ -150,7 +247,7 @@ async function verifySpreadAndLiquidity(symbol: string, quantity: number, market
     warnings.push(`⚠️ High slippage expected: ${slippagePercent.toFixed(2)}%`);
   }
   
-  const valid = warnings.length === 0 || settings.accountType === 'SIMULATION';
+  const valid = warnings.length === 0 || MODE === 'SIMULATION';
   
   return {
     valid,
@@ -163,15 +260,31 @@ async function verifySpreadAndLiquidity(symbol: string, quantity: number, market
 
 // Open trade with verification
 async function openTrade(req: TradeRequest): Promise<TradeResult> {
-  const warnings: string[] = [];
+  const modeConfig = getCurrentModeConfig();
+  
+  // Validate parameters
+  const validation = validateTradeParams(req);
+  if (!validation.valid) {
+    return { success: false, error: validation.error };
+  }
+  
+  // Check if trading is allowed in current mode
+  if (!modeConfig.allowRealTrades && MODE !== 'SIMULATION') {
+    return { success: false, error: '❌ التداول غير مسموح في الوضع الحالي' };
+  }
   
   // Get market data
   const marketData = await getMarketData(req.symbol, req.strike);
   
+  // In non-simulation mode, require real market data
+  if (!marketData && MODE !== 'SIMULATION') {
+    return { success: false, error: '❌ لا توجد بيانات سوق حقيقية - لا يمكن التنفيذ' };
+  }
+  
   // Verify spread and liquidity
   const verification = await verifySpreadAndLiquidity(req.symbol, req.quantity, marketData);
   
-  if (!verification.valid && settings.accountType !== 'SIMULATION') {
+  if (!verification.valid && MODE !== 'SIMULATION') {
     return {
       success: false,
       error: 'Trade rejected: ' + verification.warnings.join('; '),
@@ -181,20 +294,23 @@ async function openTrade(req: TradeRequest): Promise<TradeResult> {
   
   // Calculate execution price
   let executionPrice: number;
-  if (settings.orderType === 'LIMIT') {
-    // For limit orders, use bid + offset for buys
-    executionPrice = req.direction === 'CALL' || req.direction === 'BUY'
-      ? marketData.bid + settings.limitOrderOffset
-      : marketData.ask - settings.limitOrderOffset;
+  if (marketData) {
+    if (settings.orderType === 'LIMIT') {
+      executionPrice = req.direction === 'CALL' || req.direction === 'BUY'
+        ? marketData.bid + settings.limitOrderOffset
+        : marketData.ask - settings.limitOrderOffset;
+    } else {
+      executionPrice = req.direction === 'CALL' || req.direction === 'BUY'
+        ? marketData.ask
+        : marketData.bid;
+    }
   } else {
-    // Market order
-    executionPrice = req.direction === 'CALL' || req.direction === 'BUY'
-      ? marketData.ask
-      : marketData.bid;
+    // Simulation fallback price
+    executionPrice = simulatedPrices[req.symbol] ? (simulatedPrices[req.symbol] || 100) * 0.01 : 100;
   }
   
-  if (settings.accountType === 'SIMULATION') {
-    // Simulate trade
+  // SIMULATION mode - simulate trade
+  if (MODE === 'SIMULATION') {
     const simOrderId = 900000 + Math.floor(Math.random() * 100000);
     activeTrades.set(req.tradeId, { orderId: simOrderId, symbol: req.symbol, direction: req.direction, price: executionPrice, simulated: true });
     
@@ -208,16 +324,17 @@ async function openTrade(req: TradeRequest): Promise<TradeResult> {
           fillPrice: executionPrice, 
           ibOrderId: simOrderId, 
           filled: req.quantity,
-          bidPrice: marketData.bid,
-          askPrice: marketData.ask,
+          bidPrice: marketData?.bid,
+          askPrice: marketData?.ask,
           spreadPercent: verification.spread.percent,
           volumeAtExecution: verification.liquidity.available,
           slippage: verification.slippage.estimated,
+          simulated: true,
         }),
       }).catch(() => {});
     }, 500);
     
-    console.log(`🎭 [SIM] Opened: ${req.symbol} ${req.direction} @ $${executionPrice.toFixed(2)}`);
+    console.log(`🧪 [SIM] Opened: ${req.symbol} ${req.direction} @ $${executionPrice.toFixed(2)}`);
     
     return {
       success: true,
@@ -234,14 +351,14 @@ async function openTrade(req: TradeRequest): Promise<TradeResult> {
   if (!isConnected) {
     const connected = await connectToIB();
     if (!connected) {
-      return { success: false, error: 'Not connected to IB' };
+      return { success: false, error: '❌ غير متصل بـ IB' };
     }
   }
   
   const tradeOrderId = orderId++;
   activeTrades.set(req.tradeId, { orderId: tradeOrderId, symbol: req.symbol, direction: req.direction, price: executionPrice, simulated: false });
   
-  // Simulate execution for now
+  // Simulate execution for now (TODO: real IB execution)
   setTimeout(() => {
     fetch(`http://localhost:3000/api/trades/${req.tradeId}/update`, {
       method: 'POST',
@@ -251,16 +368,17 @@ async function openTrade(req: TradeRequest): Promise<TradeResult> {
         fillPrice: executionPrice, 
         ibOrderId: tradeOrderId, 
         filled: req.quantity,
-        bidPrice: marketData.bid,
-        askPrice: marketData.ask,
+        bidPrice: marketData?.bid,
+        askPrice: marketData?.ask,
         spreadPercent: verification.spread.percent,
         volumeAtExecution: verification.liquidity.available,
         slippage: verification.slippage.estimated,
+        simulated: false,
       }),
     }).catch(() => {});
   }, 300);
   
-  console.log(`${settings.accountType === 'LIVE' ? '🔴' : '🟢'} Opened: ${req.symbol} ${req.direction} @ $${executionPrice.toFixed(2)}`);
+  console.log(`${modeConfig.emoji} Opened: ${req.symbol} ${req.direction} @ $${executionPrice.toFixed(2)}`);
   
   return {
     success: true,
@@ -296,7 +414,8 @@ async function closeTrade(tradeId: string): Promise<{ success: boolean; error?: 
 app.get('/health', (_req, res) => res.json({ 
   status: 'ok', 
   connected: isConnected, 
-  accountType: settings.accountType, 
+  mode: MODE,
+  modeConfig: getCurrentModeConfig(),
   activeTrades: activeTrades.size,
   settings: {
     checkSpread: settings.checkSpread,
@@ -309,7 +428,7 @@ app.get('/health', (_req, res) => res.json({
 
 app.post('/bot/start', async (_req, res) => {
   const connected = await connectToIB();
-  res.json({ success: connected, connected: isConnected, accountType: settings.accountType });
+  res.json({ success: connected, connected: isConnected, mode: MODE });
 });
 
 app.post('/bot/stop', async (_req, res) => {
@@ -321,13 +440,12 @@ app.post('/ib/connect', async (req, res) => {
   const { host, port, clientId, accountType } = req.body;
   if (accountType) {
     settings.accountType = accountType;
-    settings.ibPort = ACCOUNT_PORTS[accountType as keyof typeof ACCOUNT_PORTS] || port;
   }
   if (host) settings.ibHost = host;
   if (port) settings.ibPort = port;
   if (clientId) settings.ibClientId = clientId;
   const connected = await connectToIB();
-  res.json({ success: connected, connected: isConnected, accountType: settings.accountType });
+  res.json({ success: connected, connected: isConnected, mode: MODE });
 });
 
 app.post('/ib/disconnect', async (_req, res) => {
@@ -351,16 +469,28 @@ app.post('/trade/trailing', (req, res) => {
 // Market data
 app.get('/market/:symbol', async (req, res) => {
   const marketData = await getMarketData(req.params.symbol);
+  const modeConfig = getCurrentModeConfig();
+  
+  if (!marketData && MODE !== 'SIMULATION') {
+    return res.json({
+      symbol: req.params.symbol,
+      error: 'لا توجد بيانات حقيقية',
+      mode: MODE,
+      simulated: false,
+    });
+  }
+  
   res.json({ 
     symbol: req.params.symbol,
-    price: (marketData.bid + marketData.ask) / 2,
-    bid: marketData.bid,
-    ask: marketData.ask,
-    bidSize: marketData.bidSize,
-    askSize: marketData.askSize,
-    volume: marketData.volume,
-    openInterest: marketData.openInterest,
-    simulated: settings.accountType === 'SIMULATION',
+    price: marketData ? (marketData.bid + marketData.ask) / 2 : null,
+    bid: marketData?.bid,
+    ask: marketData?.ask,
+    bidSize: marketData?.bidSize,
+    askSize: marketData?.askSize,
+    volume: marketData?.volume,
+    openInterest: marketData?.openInterest,
+    simulated: !marketData?.isReal,
+    mode: MODE,
   });
 });
 
@@ -373,13 +503,15 @@ app.post('/verify', async (req, res) => {
   res.json({
     symbol,
     quantity,
-    marketData: {
+    mode: MODE,
+    marketData: marketData ? {
       bid: marketData.bid,
       ask: marketData.ask,
       last: marketData.last,
       volume: marketData.volume,
       openInterest: marketData.openInterest,
-    },
+      isReal: marketData.isReal,
+    } : null,
     verification: {
       valid: verification.valid,
       warnings: verification.warnings,
@@ -399,17 +531,25 @@ app.post('/verify', async (req, res) => {
 app.post('/settings', (req, res) => {
   const newSettings = req.body;
   settings = { ...settings, ...newSettings };
-  res.json({ success: true, settings });
+  res.json({ success: true, settings, mode: MODE });
 });
 
-app.get('/settings', (_req, res) => res.json(settings));
+app.get('/settings', (_req, res) => res.json({ settings, mode: MODE }));
 
 // Start server
+const modeConfig = getCurrentModeConfig();
+
+console.log('╔════════════════════════════════════════════════════════════╗');
+console.log('║       🤖 IB SERVICE - SAFE TRADING EXECUTION              ║');
+console.log('╠════════════════════════════════════════════════════════════╣');
+console.log(`║ ${modeConfig.emoji} Mode: ${modeConfig.name.padEnd(48)}║`);
+console.log(`║ 📡 Port: ${PORT}                                               ║`);
+console.log(`║ 🔌 IB Port: ${modeConfig.ibPort.toString().padEnd(42)}║`);
+console.log(`║ 🔒 Allow Fake Data: ${String(modeConfig.allowFakeData).padEnd(32)}║`);
+console.log(`║ 📊 Spread check: ${settings.checkSpread ? '✅' : '❌'} (max ${settings.maxSpreadPercent}%)                    ║`);
+console.log(`║ 💧 Liquidity check: ${settings.checkLiquidity ? '✅' : '❌'} (min ${settings.minLiquidity} contracts)        ║`);
+console.log('╚════════════════════════════════════════════════════════════╝');
+
 app.listen(PORT, () => {
-  console.log(`🤖 IB Service running on port ${PORT}`);
-  console.log(`📡 Modes: 🟣 Simulation | 🟢 Paper (7497) | 🔴 Live (7496)`);
-  console.log(`📊 Spread check: ${settings.checkSpread ? '✅' : '❌'} (max ${settings.maxSpreadPercent}%)`);
-  console.log(`💧 Liquidity check: ${settings.checkLiquidity ? '✅' : '❌'} (min ${settings.minLiquidity} contracts)`);
-  console.log(`📈 Max slippage: ${settings.maxSlippagePercent}%`);
-  console.log(`Current mode: ${settings.accountType}`);
+  console.log(`✅ IB Service running safely on port ${PORT}`);
 });
