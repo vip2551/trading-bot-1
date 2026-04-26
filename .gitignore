@@ -11,6 +11,8 @@ build/
 *.db-journal
 db/*.db
 db/*.db-journal
+prisma/*.db
+prisma/*.db-journal
 
 # Environment
 .env
