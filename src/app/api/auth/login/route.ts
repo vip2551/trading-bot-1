@@ -1,96 +1,83 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import * as crypto from 'crypto';
+import { verifyPassword, needsRehash, hashPassword } from '@/lib/password-hash';
+import { loginRateLimiter } from '@/lib/rate-limiter';
 
-// Simple password hashing
-function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password + 'trading-bot-salt').digest('hex');
-}
-
-// Generate TOTP code
-function generateTwoFactorCode(secret: string): string {
-  const time = Math.floor(Date.now() / 30000);
-  const hmac = crypto.createHmac('sha1', secret || 'default').update(time.toString()).digest();
-  const offset = hmac[hmac.length - 1] & 0x0f;
-  const code = ((hmac[offset] & 0x7f) << 24 |
-                (hmac[offset + 1] & 0xff) << 16 |
-                (hmac[offset + 2] & 0xff) << 8 |
-                (hmac[offset + 3] & 0xff)) % 1000000;
-  return code.toString().padStart(6, '0');
-}
-
-// POST - Login
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json();
-    const { email, password, twoFactorCode } = body;
+    // التحقق من Rate Limiting
+    const rateCheck = loginRateLimiter.check(req);
+    if (!rateCheck.success) {
+      return NextResponse.json({
+        success: false,
+        error: rateCheck.blocked 
+          ? 'Account temporarily locked. Try again later.'
+          : 'Too many attempts. Please wait.',
+        retryAfter: Math.ceil((rateCheck.resetTime - Date.now()) / 1000)
+      }, { 
+        status: 429,
+        headers: {
+          'Retry-After': String(Math.ceil((rateCheck.resetTime - Date.now()) / 1000))
+        }
+      });
+    }
+
+    const { email, password } = await req.json();
 
     if (!email || !password) {
-      return NextResponse.json({ error: 'البريد الإلكتروني وكلمة المرور مطلوبان' }, { status: 400 });
+      return NextResponse.json({
+        success: false,
+        error: 'Email and password required'
+      }, { status: 400 });
     }
 
-    // Find user
     const user = await db.user.findUnique({
-      where: { email: email.toLowerCase() },
-      include: {
-        subscription: { include: { plan: true } }
-      }
+      where: { email: email.toLowerCase() }
     });
 
-    if (!user) {
-      return NextResponse.json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' }, { status: 401 });
+    if (!user || !user.password) {
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid credentials'
+      }, { status: 401 });
     }
 
-    // Check password
-    if (user.password && user.password !== hashPassword(password)) {
-      return NextResponse.json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' }, { status: 401 });
+    const isValid = await verifyPassword(password, user.password);
+
+    if (!isValid) {
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid credentials'
+      }, { status: 401 });
     }
 
-    // Check 2FA if enabled
-    if (user.twoFactorEnabled) {
-      if (!twoFactorCode) {
-        return NextResponse.json({ 
-          requiresTwoFactor: true,
-          message: 'مطلوب المصادقة الثنائية'
-        }, { status: 200 });
-      }
-      
-      const expectedCode = generateTwoFactorCode(user.twoFactorSecret || '');
-      if (twoFactorCode !== expectedCode) {
-        return NextResponse.json({ error: 'رمز المصادقة الثنائية غير صحيح' }, { status: 401 });
-      }
+    // ترحيل كلمة المرور إذا تحتاج rehash
+    if (needsRehash(user.password)) {
+      const newHash = await hashPassword(password);
+      await db.user.update({
+        where: { id: user.id },
+        data: { password: newHash }
+      });
     }
 
-    // Check subscription status
-    const hasActiveSubscription = user.subscription && 
-      user.subscription.status === 'ACTIVE' &&
-      (!user.subscription.currentPeriodEnd || new Date(user.subscription.currentPeriodEnd) > new Date());
-
-    // Return user info (without password)
-    const { password: _, twoFactorSecret: __, resetToken: ___, verificationToken: ____, ...userSafe } = user;
-
-    // Log login
-    await db.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'LOGIN',
-        entity: 'User',
-        entityId: user.id,
-        status: 'SUCCESS'
-      }
-    }).catch(() => {});
+    // إعادة تعيين rate limiter عند النجاح
+    loginRateLimiter.reset(req);
 
     return NextResponse.json({
       success: true,
       user: {
-        ...userSafe,
-        hasActiveSubscription
-      },
-      message: 'تم تسجيل الدخول بنجاح'
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role
+      }
     });
 
   } catch (error) {
     console.error('Login error:', error);
-    return NextResponse.json({ error: 'فشل تسجيل الدخول' }, { status: 500 });
+    return NextResponse.json({
+      success: false,
+      error: 'Internal server error'
+    }, { status: 500 });
   }
 }

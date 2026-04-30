@@ -1,555 +1,601 @@
 import express from 'express';
 import cors from 'cors';
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 🤖 IB SERVICE - Safe Trading Execution
-// ═══════════════════════════════════════════════════════════════════════════════
+import WebSocket from 'ws';
 
 const app = express();
-app.use(cors());
+const PORT = 3002;
+
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
+  credentials: true
+}));
 app.use(express.json());
 
-const PORT = 3003;
+// ==================== IB KR CONFIG ====================
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 🎯 TRADING MODE CONFIGURATION
-// ═══════════════════════════════════════════════════════════════════════════════
-
-type TradingMode = 'SIMULATION' | 'PAPER' | 'LIVE';
-
-const MODE: TradingMode = (process.env.TRADING_MODE as TradingMode) || 'PAPER';
-
-const MODE_CONFIG = {
-  SIMULATION: {
-    name: 'Simulation',
-    emoji: '🧪',
-    allowRealTrades: false,
-    allowFakeData: true,
-    ibPort: 0, // No IB connection
-  },
-  PAPER: {
-    name: 'Paper Trading',
-    emoji: '📝',
-    allowRealTrades: true,
-    allowFakeData: false,
-    ibPort: 7497, // TWS Paper Trading
-  },
-  LIVE: {
-    name: 'Live Trading',
-    emoji: '🔴',
-    allowRealTrades: true,
-    allowFakeData: false,
-    ibPort: 7496, // TWS Live
-  },
-} as const;
-
-const getCurrentModeConfig = () => MODE_CONFIG[MODE];
-
-// Types
-interface Settings {
-  accountType: string;
-  ibHost: string;
-  ibPort: number;
-  ibClientId: number;
-  // Spread & Liquidity
-  checkSpread: boolean;
-  maxSpreadPercent: number;
-  checkLiquidity: boolean;
-  minLiquidity: number;
-  maxSlippagePercent: number;
-  // Execution
-  orderType: string;
-  limitOrderOffset: number;
-  timeoutSeconds: number;
-  retryAttempts: number;
+interface IBConfig {
+  host: string;
+  port: number;
+  clientId: number;
 }
 
-interface MarketData {
-  bid: number;
-  ask: number;
-  last: number;
-  bidSize: number;
-  askSize: number;
-  volume: number;
-  openInterest: number;
-  isReal: boolean;
-}
-
-interface TradeRequest {
-  tradeId: string;
-  symbol: string;
-  direction: string;
-  quantity: number;
-  strike?: number | null;
-  stopLoss?: number | null;
-  takeProfit?: number | null;
-}
-
-interface TradeResult {
-  success: boolean;
-  orderId?: number;
-  error?: string;
-  simulated?: boolean;
-  warnings?: string[];
-  spread?: { value: number; percent: number };
-  liquidity?: { available: number; required: number };
-  slippage?: { estimated: number; percent: number };
-}
-
-let isConnected = false;
-let orderId = 1;
-let settings: Settings = {
-  accountType: MODE,
-  ibHost: '127.0.0.1',
-  ibPort: getCurrentModeConfig().ibPort,
-  ibClientId: 1,
-  checkSpread: true,
-  maxSpreadPercent: 5.0,
-  checkLiquidity: true,
-  minLiquidity: 100,
-  maxSlippagePercent: 1.0,
-  orderType: 'LIMIT',
-  limitOrderOffset: 0.5,
-  timeoutSeconds: 30,
-  retryAttempts: 3,
+const IB_CONFIG: IBConfig = {
+  host: process.env.IB_HOST || '127.0.0.1',
+  port: parseInt(process.env.IB_PORT || '7497'),
+  clientId: parseInt(process.env.IB_CLIENT_ID || '1')
 };
 
-const simulatedPrices: Record<string, number> = { SPX: 5800, ES: 5800, GC: 2350, AAPL: 180, TSLA: 250 };
-const activeTrades = new Map<string, { orderId: number; symbol: string; direction: string; price: number; simulated: boolean }>();
+// ==================== ORDER TRACKING ====================
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// 🔒 SAFETY VALIDATORS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function validateTradeParams(params: TradeRequest): { valid: boolean; error?: string } {
-  if (!params.tradeId) {
-    return { valid: false, error: '❌ Missing trade ID' };
-  }
-  if (!params.symbol) {
-    return { valid: false, error: '❌ Missing symbol' };
-  }
-  if (!params.quantity || params.quantity <= 0) {
-    return { valid: false, error: '❌ Invalid quantity' };
-  }
-  if (!params.direction || !['CALL', 'PUT', 'BUY', 'SELL'].includes(params.direction)) {
-    return { valid: false, error: '❌ Invalid direction' };
-  }
-  return { valid: true };
+interface Order {
+  orderId: number;
+  symbol: string;
+  action: 'BUY' | 'SELL';
+  quantity: number;
+  orderType: string;
+  status: string;
+  limitPrice?: number;
+  stopPrice?: number;
+  parentId?: number;
+  bracketId?: string;
+  createdAt: Date;
 }
 
-// Connect to IB
-async function connectToIB(): Promise<boolean> {
-  const modeConfig = getCurrentModeConfig();
-  
-  if (MODE === 'SIMULATION') {
-    console.log('🧪 [SIMULATION] لا يوجد اتصال بـ IB');
-    isConnected = true;
-    return true;
-  }
-  
-  console.log(`📡 Connecting to IB at ${settings.ibHost}:${settings.ibPort}`);
-  console.log(`${modeConfig.emoji} Mode: ${modeConfig.name}`);
-  
-  // In production: actual IB connection here using @stoqey/ib
-  // For now, simulate connection for testing
-  isConnected = true;
-  return true;
+interface BracketOrder {
+  bracketId: string;
+  parentOrderId: number;
+  stopLossOrderId: number;
+  takeProfitOrderId: number;
+  symbol: string;
+  action: 'BUY' | 'SELL';
+  quantity: number;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  status: 'pending' | 'submitted' | 'filled' | 'cancelled';
+  createdAt: Date;
 }
 
-async function disconnectFromIB(): Promise<void> {
-  isConnected = false;
-  console.log('📡 Disconnected from IB');
-}
+const orders: Map<number, Order> = new Map();
+const bracketOrders: Map<string, BracketOrder> = new Map();
+let nextOrderId = 1;
 
-// Get market data
-async function getMarketData(symbol: string, strike?: number | null): Promise<MarketData | null> {
-  const modeConfig = getCurrentModeConfig();
-  
-  // In SIMULATION mode, use simulated data
-  if (MODE === 'SIMULATION') {
-    const basePrice = simulatedPrices[symbol] || 100;
-    const optionPremium = symbol === 'SPX' && strike ? basePrice * 0.01 : 0;
-    const midPrice = (basePrice * 0.01) + optionPremium + (Math.random() - 0.5) * 5;
-    
-    const spreadPercent = 2;
-    const halfSpread = midPrice * (spreadPercent / 100);
-    
-    return {
-      bid: midPrice - halfSpread,
-      ask: midPrice + halfSpread,
-      last: midPrice,
-      bidSize: Math.floor(Math.random() * 500) + 100,
-      askSize: Math.floor(Math.random() * 500) + 100,
-      volume: Math.floor(Math.random() * 10000) + 1000,
-      openInterest: Math.floor(Math.random() * 50000) + 5000,
-      isReal: false,
-    };
-  }
-  
-  // In PAPER/LIVE mode, get real data from IB
-  // TODO: Implement actual IB market data subscription
-  // For now, return null to indicate no real data
-  console.warn(`⚠️ [${modeConfig.name}] لا توجد بيانات حقيقية من IB لـ ${symbol}`);
-  return null;
-}
+// ==================== IB CONNECTION ====================
 
-// Verify spread and liquidity before trade
-async function verifySpreadAndLiquidity(symbol: string, quantity: number, marketData: MarketData | null): Promise<{ valid: boolean; warnings: string[]; spread: { value: number; percent: number }; liquidity: { available: number; required: number }; slippage: { estimated: number; percent: number } }> {
-  const warnings: string[] = [];
-  
-  // If no market data, reject in non-simulation mode
-  if (!marketData) {
-    if (MODE !== 'SIMULATION') {
-      return {
-        valid: false,
-        warnings: ['❌ لا توجد بيانات سوق حقيقية'],
-        spread: { value: 0, percent: 0 },
-        liquidity: { available: 0, required: quantity },
-        slippage: { estimated: 0, percent: 0 },
-      };
+let ibSocket: WebSocket | null = null;
+let isConnected = false;
+
+function connectToIB(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      ibSocket = new WebSocket(`ws://${IB_CONFIG.host}:${IB_CONFIG.port}`);
+      
+      ibSocket.on('open', () => {
+        console.log('[IB] Connected to TWS/Gateway');
+        isConnected = true;
+        
+        // إرسال طلب الاتصال
+        sendMessage({
+          type: 'connect',
+          clientId: IB_CONFIG.clientId
+        });
+        
+        resolve(true);
+      });
+      
+      ibSocket.on('message', (data: string) => {
+        try {
+          const message = JSON.parse(data);
+          handleIBMessage(message);
+        } catch (e) {
+          console.error('[IB] Parse error:', e);
+        }
+      });
+      
+      ibSocket.on('error', (error) => {
+        console.error('[IB] Connection error:', error);
+        isConnected = false;
+        resolve(false);
+      });
+      
+      ibSocket.on('close', () => {
+        console.log('[IB] Disconnected');
+        isConnected = false;
+        // إعادة الاتصال بعد 5 ثواني
+        setTimeout(connectToIB, 5000);
+      });
+      
+    } catch (error) {
+      console.error('[IB] Connection failed:', error);
+      resolve(false);
     }
-    // In simulation, allow without verification
-    return {
-      valid: true,
-      warnings: ['🧪 [SIMULATION] لا توجد بيانات للتحقق'],
-      spread: { value: 0, percent: 0 },
-      liquidity: { available: 1000, required: quantity },
-      slippage: { estimated: 0, percent: 0 },
-    };
+  });
+}
+
+function sendMessage(message: any) {
+  if (ibSocket && isConnected) {
+    ibSocket.send(JSON.stringify(message));
   }
-  
-  // Check spread
-  const spreadValue = marketData.ask - marketData.bid;
-  const midPrice = (marketData.ask + marketData.bid) / 2;
-  const spreadPercent = (spreadValue / midPrice) * 100;
-  
-  if (settings.checkSpread && spreadPercent > settings.maxSpreadPercent) {
-    warnings.push(`⚠️ Spread too high: ${spreadPercent.toFixed(2)}% > ${settings.maxSpreadPercent}%`);
+}
+
+function handleIBMessage(message: any) {
+  switch (message.type) {
+    case 'nextOrderId':
+      nextOrderId = message.orderId;
+      break;
+      
+    case 'orderStatus':
+      if (orders.has(message.orderId)) {
+        const order = orders.get(message.orderId)!;
+        order.status = message.status;
+        orders.set(message.orderId, order);
+        
+        // تحديث Bracket Order
+        if (order.bracketId && bracketOrders.has(order.bracketId)) {
+          const bracket = bracketOrders.get(order.bracketId)!;
+          if (message.status === 'Filled') {
+            bracket.status = 'filled';
+          } else if (message.status === 'Cancelled') {
+            bracket.status = 'cancelled';
+          }
+          bracketOrders.set(order.bracketId, bracket);
+        }
+      }
+      break;
+      
+    case 'error':
+      console.error('[IB] Error:', message);
+      break;
   }
+}
+
+// ==================== ORDER FUNCTIONS ====================
+
+function getNextOrderId(): number {
+  return nextOrderId++;
+}
+
+async function placeSingleOrder(params: {
+  symbol: string;
+  action: 'BUY' | 'SELL';
+  quantity: number;
+  orderType: 'MKT' | 'LMT' | 'STP' | 'STP_LMT';
+  limitPrice?: number;
+  stopPrice?: number;
+  parentId?: number;
+  transmit?: boolean;
+}): Promise<number> {
+  const orderId = getNextOrderId();
   
-  // Check liquidity
-  const availableLiquidity = Math.min(marketData.bidSize, marketData.askSize);
-  
-  if (settings.checkLiquidity && availableLiquidity < settings.minLiquidity) {
-    warnings.push(`⚠️ Low liquidity: ${availableLiquidity} < ${settings.minLiquidity} contracts`);
-  }
-  
-  if (settings.checkLiquidity && availableLiquidity < quantity) {
-    warnings.push(`⚠️ Insufficient liquidity: need ${quantity}, only ${availableLiquidity} available`);
-  }
-  
-  // Estimate slippage
-  const slippageRatio = Math.min(quantity / availableLiquidity, 1);
-  const estimatedSlippage = spreadValue * (1 + slippageRatio * 2);
-  const slippagePercent = (estimatedSlippage / midPrice) * 100;
-  
-  if (slippagePercent > settings.maxSlippagePercent) {
-    warnings.push(`⚠️ High slippage expected: ${slippagePercent.toFixed(2)}%`);
-  }
-  
-  const valid = warnings.length === 0 || MODE === 'SIMULATION';
-  
-  return {
-    valid,
-    warnings,
-    spread: { value: spreadValue, percent: spreadPercent },
-    liquidity: { available: availableLiquidity, required: quantity },
-    slippage: { estimated: estimatedSlippage, percent: slippagePercent },
+  const order: Order = {
+    orderId,
+    symbol: params.symbol,
+    action: params.action,
+    quantity: params.quantity,
+    orderType: params.orderType,
+    status: 'pending',
+    limitPrice: params.limitPrice,
+    stopPrice: params.stopPrice,
+    parentId: params.parentId,
+    createdAt: new Date()
   };
+  
+  orders.set(orderId, order);
+  
+  sendMessage({
+    type: 'placeOrder',
+    orderId,
+    contract: {
+      symbol: params.symbol,
+      secType: 'STK',
+      exchange: 'SMART',
+      currency: 'USD'
+    },
+    order: {
+      action: params.action,
+      orderType: params.orderType,
+      totalQuantity: params.quantity,
+      lmtPrice: params.limitPrice,
+      auxPrice: params.stopPrice,
+      parentId: params.parentId || 0,
+      transmit: params.transmit !== false
+    }
+  });
+  
+  return orderId;
 }
 
-// Open trade with verification
-async function openTrade(req: TradeRequest): Promise<TradeResult> {
-  const modeConfig = getCurrentModeConfig();
+// ==================== BRACKET ORDER ====================
+
+async function placeBracketOrder(params: {
+  symbol: string;
+  action: 'BUY' | 'SELL';
+  quantity: number;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+}): Promise<BracketOrder> {
   
-  // Validate parameters
-  const validation = validateTradeParams(req);
-  if (!validation.valid) {
-    return { success: false, error: validation.error };
-  }
+  const bracketId = `BRACKET-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   
-  // Check if trading is allowed in current mode
-  if (!modeConfig.allowRealTrades && MODE !== 'SIMULATION') {
-    return { success: false, error: '❌ التداول غير مسموح في الوضع الحالي' };
-  }
+  console.log(`[IB] Placing bracket order: ${bracketId}`);
+  console.log(`[IB] Symbol: ${params.symbol}, Action: ${params.action}`);
+  console.log(`[IB] Entry: ${params.entryPrice}, SL: ${params.stopLoss}, TP: ${params.takeProfit}`);
   
-  // Get market data
-  const marketData = await getMarketData(req.symbol, req.strike);
+  // 1. الأمر الرئيسي (Parent Order) - transmit: false
+  const parentOrderId = await placeSingleOrder({
+    symbol: params.symbol,
+    action: params.action,
+    quantity: params.quantity,
+    orderType: 'LMT',
+    limitPrice: params.entryPrice,
+    transmit: false  // ⚠️ لا ترسل حتى تُضاف الأوامر الفرعية
+  });
   
-  // In non-simulation mode, require real market data
-  if (!marketData && MODE !== 'SIMULATION') {
-    return { success: false, error: '❌ لا توجد بيانات سوق حقيقية - لا يمكن التنفيذ' };
-  }
+  // تحديث الأمر الرئيسي مع bracketId
+  const parentOrder = orders.get(parentOrderId)!;
+  parentOrder.bracketId = bracketId;
+  orders.set(parentOrderId, parentOrder);
   
-  // Verify spread and liquidity
-  const verification = await verifySpreadAndLiquidity(req.symbol, req.quantity, marketData);
+  // 2. Stop Loss Order (Child Order 1) - parentId + transmit: false
+  const stopLossOrderId = await placeSingleOrder({
+    symbol: params.symbol,
+    action: params.action === 'BUY' ? 'SELL' : 'BUY',
+    quantity: params.quantity,
+    orderType: 'STP',
+    stopPrice: params.stopLoss,
+    parentId: parentOrderId,  // ⚠️ مربوط بالأمر الرئيسي
+    transmit: false           // ⚠️ لا ترسل بعد
+  });
   
-  if (!verification.valid && MODE !== 'SIMULATION') {
-    return {
-      success: false,
-      error: 'Trade rejected: ' + verification.warnings.join('; '),
-      warnings: verification.warnings,
-    };
-  }
+  const stopLossOrder = orders.get(stopLossOrderId)!;
+  stopLossOrder.bracketId = bracketId;
+  orders.set(stopLossOrderId, stopLossOrder);
   
-  // Calculate execution price
-  let executionPrice: number;
-  if (marketData) {
-    if (settings.orderType === 'LIMIT') {
-      executionPrice = req.direction === 'CALL' || req.direction === 'BUY'
-        ? marketData.bid + settings.limitOrderOffset
-        : marketData.ask - settings.limitOrderOffset;
-    } else {
-      executionPrice = req.direction === 'CALL' || req.direction === 'BUY'
-        ? marketData.ask
-        : marketData.bid;
+  // 3. Take Profit Order (Child Order 2) - parentId + transmit: true
+  const takeProfitOrderId = await placeSingleOrder({
+    symbol: params.symbol,
+    action: params.action === 'BUY' ? 'SELL' : 'BUY',
+    quantity: params.quantity,
+    orderType: 'LMT',
+    limitPrice: params.takeProfit,
+    parentId: parentOrderId,  // ⚠️ مربوط بالأمر الرئيسي
+    transmit: true            // ⚠️ يرسل الأوامر الثلاثة معاً
+  });
+  
+  const takeProfitOrder = orders.get(takeProfitOrderId)!;
+  takeProfitOrder.bracketId = bracketId;
+  orders.set(takeProfitOrderId, takeProfitOrder);
+  
+  // حفظ Bracket Order
+  const bracketOrder: BracketOrder = {
+    bracketId,
+    parentOrderId,
+    stopLossOrderId,
+    takeProfitOrderId,
+    symbol: params.symbol,
+    action: params.action,
+    quantity: params.quantity,
+    entryPrice: params.entryPrice,
+    stopLoss: params.stopLoss,
+    takeProfit: params.takeProfit,
+    status: 'submitted',
+    createdAt: new Date()
+  };
+  
+  bracketOrders.set(bracketId, bracketOrder);
+  
+  console.log(`[IB] Bracket order submitted: ${bracketId}`);
+  console.log(`[IB] Parent: ${parentOrderId}, SL: ${stopLossOrderId}, TP: ${takeProfitOrderId}`);
+  
+  return bracketOrder;
+}
+
+// ==================== TRAILING STOP ====================
+
+async function placeTrailingStop(params: {
+  symbol: string;
+  action: 'BUY' | 'SELL';
+  quantity: number;
+  trailingPercent: number;
+  trailingAmount?: number;
+}): Promise<number> {
+  
+  const orderId = getNextOrderId();
+  
+  sendMessage({
+    type: 'placeOrder',
+    orderId,
+    contract: {
+      symbol: params.symbol,
+      secType: 'STK',
+      exchange: 'SMART',
+      currency: 'USD'
+    },
+    order: {
+      action: params.action,
+      orderType: 'TRAIL',
+      totalQuantity: params.quantity,
+      trailingPercent: params.trailingPercent,
+      trailingAmount: params.trailingAmount,
+      transmit: true
     }
-  } else {
-    // Simulation fallback price
-    executionPrice = simulatedPrices[req.symbol] ? (simulatedPrices[req.symbol] || 100) * 0.01 : 100;
-  }
+  });
   
-  // SIMULATION mode - simulate trade
-  if (MODE === 'SIMULATION') {
-    const simOrderId = 900000 + Math.floor(Math.random() * 100000);
-    activeTrades.set(req.tradeId, { orderId: simOrderId, symbol: req.symbol, direction: req.direction, price: executionPrice, simulated: true });
+  orders.set(orderId, {
+    orderId,
+    symbol: params.symbol,
+    action: params.action,
+    quantity: params.quantity,
+    orderType: 'TRAIL',
+    status: 'pending',
+    createdAt: new Date()
+  });
+  
+  return orderId;
+}
+
+// ==================== API ROUTES ====================
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    connected: isConnected,
+    nextOrderId,
+    ordersCount: orders.size,
+    bracketOrdersCount: bracketOrders.size
+  });
+});
+
+// Get connection status
+app.get('/status', (req, res) => {
+  res.json({
+    connected: isConnected,
+    config: {
+      host: IB_CONFIG.host,
+      port: IB_CONFIG.port,
+      clientId: IB_CONFIG.clientId
+    }
+  });
+});
+
+// Place simple order
+app.post('/order', async (req, res) => {
+  try {
+    const { symbol, action, quantity, orderType, limitPrice, stopPrice } = req.body;
     
-    // Notify main app after delay
-    setTimeout(() => {
-      fetch(`http://localhost:3000/api/trades/${req.tradeId}/update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          status: 'OPEN', 
-          fillPrice: executionPrice, 
-          ibOrderId: simOrderId, 
-          filled: req.quantity,
-          bidPrice: marketData?.bid,
-          askPrice: marketData?.ask,
-          spreadPercent: verification.spread.percent,
-          volumeAtExecution: verification.liquidity.available,
-          slippage: verification.slippage.estimated,
-          simulated: true,
-        }),
-      }).catch(() => {});
-    }, 500);
+    if (!symbol || !action || !quantity) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: symbol, action, quantity'
+      });
+    }
     
-    console.log(`🧪 [SIM] Opened: ${req.symbol} ${req.direction} @ $${executionPrice.toFixed(2)}`);
+    const orderId = await placeSingleOrder({
+      symbol,
+      action: action.toUpperCase() as 'BUY' | 'SELL',
+      quantity,
+      orderType: orderType || 'MKT',
+      limitPrice,
+      stopPrice
+    });
     
-    return {
+    res.json({
       success: true,
-      orderId: simOrderId,
-      simulated: true,
-      warnings: verification.warnings,
-      spread: verification.spread,
-      liquidity: verification.liquidity,
-      slippage: verification.slippage,
-    };
+      orderId,
+      message: 'Order placed successfully'
+    });
+    
+  } catch (error) {
+    console.error('[IB] Order error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to place order'
+    });
   }
-  
-  // Real IB trade (when connected)
-  if (!isConnected) {
-    const connected = await connectToIB();
-    if (!connected) {
-      return { success: false, error: '❌ غير متصل بـ IB' };
+});
+
+// Place bracket order
+app.post('/order/bracket', async (req, res) => {
+  try {
+    const { symbol, action, quantity, entryPrice, stopLoss, takeProfit } = req.body;
+    
+    if (!symbol || !action || !quantity || !entryPrice || !stopLoss || !takeProfit) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: symbol, action, quantity, entryPrice, stopLoss, takeProfit'
+      });
     }
+    
+    // التحقق من صحة الأسعار
+    if (action.toUpperCase() === 'BUY') {
+      if (stopLoss >= entryPrice) {
+        return res.status(400).json({
+          success: false,
+          error: 'Stop loss must be below entry price for BUY orders'
+        });
+      }
+      if (takeProfit <= entryPrice) {
+        return res.status(400).json({
+          success: false,
+          error: 'Take profit must be above entry price for BUY orders'
+        });
+      }
+    } else {
+      if (stopLoss <= entryPrice) {
+        return res.status(400).json({
+          success: false,
+          error: 'Stop loss must be above entry price for SELL orders'
+        });
+      }
+      if (takeProfit >= entryPrice) {
+        return res.status(400).json({
+          success: false,
+          error: 'Take profit must be below entry price for SELL orders'
+        });
+      }
+    }
+    
+    const bracketOrder = await placeBracketOrder({
+      symbol,
+      action: action.toUpperCase() as 'BUY' | 'SELL',
+      quantity,
+      entryPrice,
+      stopLoss,
+      takeProfit
+    });
+    
+    res.json({
+      success: true,
+      bracketOrder,
+      message: 'Bracket order placed successfully'
+    });
+    
+  } catch (error) {
+    console.error('[IB] Bracket order error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to place bracket order'
+    });
   }
-  
-  const tradeOrderId = orderId++;
-  activeTrades.set(req.tradeId, { orderId: tradeOrderId, symbol: req.symbol, direction: req.direction, price: executionPrice, simulated: false });
-  
-  // Simulate execution for now (TODO: real IB execution)
-  setTimeout(() => {
-    fetch(`http://localhost:3000/api/trades/${req.tradeId}/update`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        status: 'OPEN', 
-        fillPrice: executionPrice, 
-        ibOrderId: tradeOrderId, 
-        filled: req.quantity,
-        bidPrice: marketData?.bid,
-        askPrice: marketData?.ask,
-        spreadPercent: verification.spread.percent,
-        volumeAtExecution: verification.liquidity.available,
-        slippage: verification.slippage.estimated,
-        simulated: false,
-      }),
-    }).catch(() => {});
-  }, 300);
-  
-  console.log(`${modeConfig.emoji} Opened: ${req.symbol} ${req.direction} @ $${executionPrice.toFixed(2)}`);
-  
-  return {
-    success: true,
-    orderId: tradeOrderId,
-    warnings: verification.warnings,
-    spread: verification.spread,
-    liquidity: verification.liquidity,
-    slippage: verification.slippage,
-  };
-}
+});
 
-// Close trade
-async function closeTrade(tradeId: string): Promise<{ success: boolean; error?: string }> {
-  const trade = activeTrades.get(tradeId);
-  if (!trade) return { success: false, error: 'Trade not found' };
-  
-  activeTrades.delete(tradeId);
-  
-  setTimeout(() => {
-    fetch(`http://localhost:3000/api/trades/${tradeId}/update`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'CLOSED', fillPrice: trade.price, ibOrderId: trade.orderId }),
-    }).catch(() => {});
-  }, 300);
-  
-  console.log(`Closed: ${tradeId}`);
-  return { success: true };
-}
-
-// ===== ROUTES =====
-
-app.get('/health', (_req, res) => res.json({ 
-  status: 'ok', 
-  connected: isConnected, 
-  mode: MODE,
-  modeConfig: getCurrentModeConfig(),
-  activeTrades: activeTrades.size,
-  settings: {
-    checkSpread: settings.checkSpread,
-    maxSpreadPercent: settings.maxSpreadPercent,
-    checkLiquidity: settings.checkLiquidity,
-    minLiquidity: settings.minLiquidity,
-    orderType: settings.orderType,
+// Place trailing stop
+app.post('/order/trailing-stop', async (req, res) => {
+  try {
+    const { symbol, action, quantity, trailingPercent, trailingAmount } = req.body;
+    
+    if (!symbol || !action || !quantity || (!trailingPercent && !trailingAmount)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: symbol, action, quantity, trailingPercent or trailingAmount'
+      });
+    }
+    
+    const orderId = await placeTrailingStop({
+      symbol,
+      action: action.toUpperCase() as 'BUY' | 'SELL',
+      quantity,
+      trailingPercent,
+      trailingAmount
+    });
+    
+    res.json({
+      success: true,
+      orderId,
+      message: 'Trailing stop placed successfully'
+    });
+    
+  } catch (error) {
+    console.error('[IB] Trailing stop error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to place trailing stop'
+    });
   }
-}));
-
-app.post('/bot/start', async (_req, res) => {
-  const connected = await connectToIB();
-  res.json({ success: connected, connected: isConnected, mode: MODE });
 });
 
-app.post('/bot/stop', async (_req, res) => {
-  await disconnectFromIB();
-  res.json({ success: true, connected: false });
-});
-
-app.post('/ib/connect', async (req, res) => {
-  const { host, port, clientId, accountType } = req.body;
-  if (accountType) {
-    settings.accountType = accountType;
+// Cancel order
+app.delete('/order/:orderId', (req, res) => {
+  try {
+    const orderId = parseInt(req.params.orderId);
+    
+    if (!orders.has(orderId)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Order not found'
+      });
+    }
+    
+    sendMessage({
+      type: 'cancelOrder',
+      orderId
+    });
+    
+    const order = orders.get(orderId)!;
+    order.status = 'cancelled';
+    orders.set(orderId, order);
+    
+    res.json({
+      success: true,
+      message: 'Order cancelled'
+    });
+    
+  } catch (error) {
+    console.error('[IB] Cancel error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to cancel order'
+    });
   }
-  if (host) settings.ibHost = host;
-  if (port) settings.ibPort = port;
-  if (clientId) settings.ibClientId = clientId;
-  const connected = await connectToIB();
-  res.json({ success: connected, connected: isConnected, mode: MODE });
 });
 
-app.post('/ib/disconnect', async (_req, res) => {
-  await disconnectFromIB();
-  res.json({ success: true, connected: false });
-});
-
-// Trade routes
-app.post('/trade/open', async (req, res) => res.json(await openTrade(req.body)));
-app.post('/trade/close', async (req, res) => res.json(await closeTrade(req.body.tradeId)));
-
-app.post('/trade/trailing', (req, res) => {
-  const { tradeId, amount, percent } = req.body;
-  const trade = activeTrades.get(tradeId);
-  if (trade) {
-    console.log(`Trailing stop set for ${tradeId}: ${percent ? percent + '%' : '$' + amount}`);
-  }
-  res.json({ success: true });
-});
-
-// Market data
-app.get('/market/:symbol', async (req, res) => {
-  const marketData = await getMarketData(req.params.symbol);
-  const modeConfig = getCurrentModeConfig();
+// Get order status
+app.get('/order/:orderId', (req, res) => {
+  const orderId = parseInt(req.params.orderId);
+  const order = orders.get(orderId);
   
-  if (!marketData && MODE !== 'SIMULATION') {
-    return res.json({
-      symbol: req.params.symbol,
-      error: 'لا توجد بيانات حقيقية',
-      mode: MODE,
-      simulated: false,
+  if (!order) {
+    return res.status(404).json({
+      success: false,
+      error: 'Order not found'
     });
   }
   
-  res.json({ 
-    symbol: req.params.symbol,
-    price: marketData ? (marketData.bid + marketData.ask) / 2 : null,
-    bid: marketData?.bid,
-    ask: marketData?.ask,
-    bidSize: marketData?.bidSize,
-    askSize: marketData?.askSize,
-    volume: marketData?.volume,
-    openInterest: marketData?.openInterest,
-    simulated: !marketData?.isReal,
-    mode: MODE,
+  res.json({
+    success: true,
+    order
   });
 });
 
-// Spread & Liquidity verification endpoint
-app.post('/verify', async (req, res) => {
-  const { symbol, quantity, strike } = req.body;
-  const marketData = await getMarketData(symbol, strike);
-  const verification = await verifySpreadAndLiquidity(symbol, quantity, marketData);
+// Get bracket order status
+app.get('/order/bracket/:bracketId', (req, res) => {
+  const bracketId = req.params.bracketId;
+  const bracket = bracketOrders.get(bracketId);
+  
+  if (!bracket) {
+    return res.status(404).json({
+      success: false,
+      error: 'Bracket order not found'
+    });
+  }
   
   res.json({
-    symbol,
-    quantity,
-    mode: MODE,
-    marketData: marketData ? {
-      bid: marketData.bid,
-      ask: marketData.ask,
-      last: marketData.last,
-      volume: marketData.volume,
-      openInterest: marketData.openInterest,
-      isReal: marketData.isReal,
-    } : null,
-    verification: {
-      valid: verification.valid,
-      warnings: verification.warnings,
-      spread: verification.spread,
-      liquidity: verification.liquidity,
-      slippage: verification.slippage,
-    },
-    settings: {
-      maxSpreadPercent: settings.maxSpreadPercent,
-      minLiquidity: settings.minLiquidity,
-      maxSlippagePercent: settings.maxSlippagePercent,
-    },
+    success: true,
+    bracketOrder: bracket,
+    parentOrder: orders.get(bracket.parentOrderId),
+    stopLossOrder: orders.get(bracket.stopLossOrderId),
+    takeProfitOrder: orders.get(bracket.takeProfitOrderId)
   });
 });
 
-// Settings
-app.post('/settings', (req, res) => {
-  const newSettings = req.body;
-  settings = { ...settings, ...newSettings };
-  res.json({ success: true, settings, mode: MODE });
+// Get all orders
+app.get('/orders', (req, res) => {
+  res.json({
+    success: true,
+    orders: Array.from(orders.values()),
+    bracketOrders: Array.from(bracketOrders.values())
+  });
 });
 
-app.get('/settings', (_req, res) => res.json({ settings, mode: MODE }));
+// Connect to IB
+app.post('/connect', async (req, res) => {
+  const connected = await connectToIB();
+  res.json({
+    success: connected,
+    message: connected ? 'Connected to IB' : 'Failed to connect to IB'
+  });
+});
 
-// Start server
-const modeConfig = getCurrentModeConfig();
-
-console.log('╔════════════════════════════════════════════════════════════╗');
-console.log('║       🤖 IB SERVICE - SAFE TRADING EXECUTION              ║');
-console.log('╠════════════════════════════════════════════════════════════╣');
-console.log(`║ ${modeConfig.emoji} Mode: ${modeConfig.name.padEnd(48)}║`);
-console.log(`║ 📡 Port: ${PORT}                                               ║`);
-console.log(`║ 🔌 IB Port: ${modeConfig.ibPort.toString().padEnd(42)}║`);
-console.log(`║ 🔒 Allow Fake Data: ${String(modeConfig.allowFakeData).padEnd(32)}║`);
-console.log(`║ 📊 Spread check: ${settings.checkSpread ? '✅' : '❌'} (max ${settings.maxSpreadPercent}%)                    ║`);
-console.log(`║ 💧 Liquidity check: ${settings.checkLiquidity ? '✅' : '❌'} (min ${settings.minLiquidity} contracts)        ║`);
-console.log('╚════════════════════════════════════════════════════════════╝');
+// ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log(`✅ IB Service running safely on port ${PORT}`);
+  console.log(`[IB Service] Running on port ${PORT}`);
+  console.log(`[IB Service] Connecting to TWS/Gateway at ${IB_CONFIG.host}:${IB_CONFIG.port}`);
+  
+  // محاولة الاتصال عند البدء
+  connectToIB();
 });
+
+export { placeBracketOrder, placeSingleOrder, placeTrailingStop };

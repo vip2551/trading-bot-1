@@ -109,6 +109,7 @@ model Trade {
   strategy        String?
   confidence      Float?
   notes           String?
+  bracketId       String?
   openedAt        DateTime @default(now())
   closedAt        DateTime?
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -156,23 +157,23 @@ model AuditLog {
 // ==================== BOT SETTINGS ====================
 
 model BotSettings {
-  id                String   @id @default(cuid())
-  name              String   @default("default")
-  autoTrade         Boolean  @default(false)
-  maxPositionSize   Float    @default(10000)
-  maxDailyTrades    Int      @default(10)
-  stopLossPercent   Float    @default(2)
-  takeProfitPercent Float    @default(5)
-  cooldownMinutes   Int      @default(5)
-  allowedSymbols    String   @default("[]")
-  riskLevel         String   @default("moderate")
-  tradingHoursStart String   @default("09:30")
-  tradingHoursEnd   String   @default("16:00")
-  enableBracketOrders Boolean @default(true)
-  enableTrailingStop Boolean @default(false)
-  trailingStopPercent Float  @default(1.5)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  name                String   @default("default")
+  autoTrade           Boolean  @default(false)
+  maxPositionSize     Float    @default(10000)
+  maxDailyTrades      Int      @default(10)
+  stopLossPercent     Float    @default(2)
+  takeProfitPercent   Float    @default(5)
+  cooldownMinutes     Int      @default(5)
+  allowedSymbols      String   @default("[]")
+  riskLevel           String   @default("moderate")
+  tradingHoursStart   String   @default("09:30")
+  tradingHoursEnd     String   @default("16:00")
+  enableBracketOrders Boolean  @default(true)
+  enableTrailingStop  Boolean  @default(false)
+  trailingStopPercent Float    @default(1.5)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
   @@unique([name])
 }
 
