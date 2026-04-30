@@ -1,3 +1,6 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -6,6 +9,8 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// ==================== AUTH ====================
 
 model User {
   id            String    @id @default(cuid())
@@ -19,6 +24,10 @@ model User {
   updatedAt     DateTime  @updatedAt
   accounts      Account[]
   sessions      Session[]
+  subscriptions Subscription[]
+  trades        Trade[]
+  tradeLogs     TradeLog[]
+  auditLogs     AuditLog[]
 }
 
 model Account {
@@ -53,8 +62,102 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+// ==================== SUBSCRIPTIONS ====================
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  price       Float
+  duration    Int      // بالأيام
+  features    String   // JSON
+  maxTrades   Int      @default(10)
+  maxAmount   Float    @default(10000)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id        String   @id @default(cuid())
+  userId    String
+  planId    String
+  status    String   @default("active") // active, expired, cancelled
+  startDate DateTime @default(now())
+  endDate   DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan      Plan     @relation(fields: [planId], references: [id])
+  @@index([userId])
+  @@index([status])
+}
+
+// ==================== TRADING ====================
+
+model Trade {
+  id              String   @id @default(cuid())
+  userId          String
+  symbol          String
+  action          String   // buy, sell
+  quantity        Float
+  entryPrice      Float
+  exitPrice       Float?
+  status          String   @default("open") // open, closed, cancelled
+  pnl             Float?
+  pnlPercent      Float?
+  stopLoss        Float?
+  takeProfit      Float?
+  strategy        String?
+  confidence      Float?
+  notes           String?
+  openedAt        DateTime @default(now())
+  closedAt        DateTime?
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs            TradeLog[]
+  @@index([userId])
+  @@index([symbol])
+  @@index([status])
+  @@index([openedAt])
+}
+
+model TradeLog {
+  id          String   @id @default(cuid())
+  tradeId     String
+  userId      String
+  action      String
+  price       Float
+  quantity    Float?
+  notes       String?
+  timestamp   DateTime @default(now())
+  trade       Trade    @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([tradeId])
+  @@index([userId])
+  @@index([timestamp])
+}
+
+// ==================== AUDIT ====================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   String?  // JSON
+  ip        String?
+  userAgent String?
+  timestamp DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  @@index([userId])
+  @@index([action])
+  @@index([timestamp])
+}
+
+// ==================== BOT SETTINGS ====================
+
 model BotSettings {
   id                String   @id @default(cuid())
+  name              String   @default("default")
   autoTrade         Boolean  @default(false)
   maxPositionSize   Float    @default(10000)
   maxDailyTrades    Int      @default(10)
@@ -63,6 +166,92 @@ model BotSettings {
   cooldownMinutes   Int      @default(5)
   allowedSymbols    String   @default("[]")
   riskLevel         String   @default("moderate")
+  tradingHoursStart String   @default("09:30")
+  tradingHoursEnd   String   @default("16:00")
+  enableBracketOrders Boolean @default(true)
+  enableTrailingStop Boolean @default(false)
+  trailingStopPercent Float  @default(1.5)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+  @@unique([name])
+}
+
+// ==================== PRO MAX SETTINGS ====================
+
+model ProMaxSettings {
+  id                    String   @id @default(cuid())
+  name                  String   @default("default")
+  signalScoringEnabled  Boolean  @default(true)
+  minSignalScore        Int      @default(70)
+  trendFilterEnabled    Boolean  @default(true)
+  trendStrengthMin      Float    @default(50)
+  executionGuardEnabled Boolean  @default(true)
+  simulationMode        Boolean  @default(false)
+  maxDrawdownPercent    Float    @default(10)
+  dailyLossLimit        Float    @default(1000)
+  riskPerTrade          Float    @default(2)
+  maxOpenTrades         Int      @default(3)
+  strategyWeights       String   @default("{\"macd\":0.4,\"rsi\":0.3,\"sma\":0.3}")
+  indicators            String   @default("{\"rsi\":{\"period\":14,\"overbought\":70,\"oversold\":30},\"macd\":{\"fast\":12,\"slow\":26,\"signal\":9},\"sma\":{\"short\":20,\"long\":50}}")
+  notifications         String   @default("{\"telegram\":false,\"email\":true,\"push\":true}")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  @@unique([name])
+}
+
+// ==================== MARKET DATA ====================
+
+model MarketData {
+  id        String   @id @default(cuid())
+  symbol    String
+  timestamp DateTime
+  open      Float
+  high      Float
+  low       Float
+  close     Float
+  volume    Float?
+  source    String   @default("api")
+  createdAt DateTime @default(now())
+  @@unique([symbol, timestamp])
+  @@index([symbol])
+  @@index([timestamp])
+}
+
+// ==================== SIGNALS ====================
+
+model Signal {
+  id          String   @id @default(cuid())
+  symbol      String
+  action      String   // buy, sell
+  price       Float
+  confidence  Float
+  strategy    String
+  indicators  String?  // JSON
+  score       Int?
+  status      String   @default("pending") // pending, executed, rejected, expired
+  reason      String?
+  executedAt  DateTime?
+  expiredAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([symbol])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ==================== NOTIFICATIONS ====================
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  type      String
+  title     String
+  message   String
+  data      String?  // JSON
+  read      Boolean  @default(false)
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
 }
