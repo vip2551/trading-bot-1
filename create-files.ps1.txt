@@ -1,0 +1,80 @@
+# إنشاء المجلدات
+New-Item -ItemType Directory -Force -Path "src/lib/bot"
+New-Item -ItemType Directory -Force -Path "src/app/api/test-signal"
+New-Item -ItemType Directory -Force -Path "src/app/api/bot/settings"
+
+# ملف 1: password-hash.ts
+@"
+import bcrypt from 'bcryptjs';
+
+const SALT_ROUNDS = 12;
+
+export async function hashPassword(password: string): Promise<string> {
+  if (!password || password.length < 6) throw new Error('Password must be at least 6 characters');
+  return bcrypt.hash(password, SALT_ROUNDS);
+}
+
+export async function verifyPassword(password: string, hashedPassword: string): Promise<boolean> {
+  if (!password || !hashedPassword) return false;
+  return bcrypt.compare(password, hashedPassword);
+}
+"@ | Out-File -FilePath "src/lib/password-hash.ts" -Encoding UTF8
+
+# ملف 2: rate-limiter.ts
+@"
+import { NextRequest } from 'next/server';
+
+interface RateLimitEntry { count: number; resetTime: number; }
+const rateLimitStore = new Map<string, RateLimitEntry>();
+
+export function rateLimit(config: { windowMs: number; maxRequests: number }) {
+  const { windowMs, maxRequests } = config;
+  return {
+    check: (req: NextRequest) => {
+      const ip = req.ip || req.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown';
+      const key = `rate-limit:` + ip;
+      const now = Date.now();
+      const entry = rateLimitStore.get(key);
+      if (!entry || now > entry.resetTime) {
+        rateLimitStore.set(key, { count: 1, resetTime: now + windowMs });
+        return { success: true, remaining: maxRequests - 1, resetTime: now + windowMs };
+      }
+      if (entry.count >= maxRequests) return { success: false, remaining: 0, resetTime: entry.resetTime };
+      entry.count++;
+      return { success: true, remaining: maxRequests - entry.count, resetTime: entry.resetTime };
+    }
+  };
+}
+
+export const loginRateLimiter = rateLimit({ windowMs: 15 * 60 * 1000, maxRequests: 5 });
+"@ | Out-File -FilePath "src/lib/rate-limiter.ts" -Encoding UTF8
+
+# ملف 3: timezone.ts
+@"
+import { DateTime } from 'luxon';
+
+export const MARKET_TIMEZONE = 'America/New_York';
+
+export function getMarketTime(): DateTime {
+  return DateTime.now().setZone(MARKET_TIMEZONE);
+}
+
+export function isMarketOpen(): boolean {
+  const now = getMarketTime();
+  if (now.weekday === 6 || now.weekday === 7) return false;
+  const mins = now.hour * 60 + now.minute;
+  return mins >= 570 && mins < 960; // 9:30 AM - 4:00 PM
+}
+
+export function getMarketSession(): string {
+  const now = getMarketTime();
+  if (now.weekday === 6 || now.weekday === 7) return 'closed';
+  const mins = now.hour * 60 + now.minute;
+  if (mins < 570) return 'pre-market';
+  if (mins < 960) return 'market';
+  if (mins < 1200) return 'after-hours';
+  return 'closed';
+}
+"@ | Out-File -FilePath "src/lib/timezone.ts" -Encoding UTF8
+
+Write-Host "Files created successfully!"

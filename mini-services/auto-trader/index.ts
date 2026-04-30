@@ -711,7 +711,8 @@ serve({
     const path = url.pathname;
     
     const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
+'Access-Control-Allow-Origin': process.env.ALLOWED_ORIGINS || 'http://localhost:3000',
+'Access-Control-Allow-Credentials': 'true'
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     };
